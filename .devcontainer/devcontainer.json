@@ -8,8 +8,8 @@
   // Features to add to the dev container. More info: https://containers.dev/features.
   // "features": {},
 
-  // Use 'forwardPorts' to make a list of ports inside the container available locally.
-  // "forwardPorts": [],
+  // Forward ports so the host/Cursor preview can reach the dev server.
+  "forwardPorts": [8000],
 
   // Use 'postCreateCommand' to run commands after the container is created.
   // "postCreateCommand": "yarn install",

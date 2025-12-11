@@ -9,7 +9,9 @@
     "prepare": "husky install",
     "build": "tsc",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "dev": "pnpm dlx http-server . -p 8000",
+    "serve": "pnpm dlx http-server . -p 8000"
   },
   "keywords": [],
   "author": "Your Name",
@@ -21,6 +23,7 @@
     "@commitlint/format": "^20.2.0",
     "@eslint/js": "^9.39.1",
     "@types/node": "^25.0.0",
+    "@webgpu/types": "^0.1.67",
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^16.5.0",
@@ -28,6 +31,8 @@
     "jiti": "^2.6.1",
     "lint-staged": "^16.2.7",
     "prettier": "3.7.4",
+    "sharp": "^0.34.5",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.49.0"
   },
@@ -38,5 +43,8 @@
     "*.{ts,js,json,md}": [
       "prettier --write"
     ]
+  },
+  "dependencies": {
+    "webgpu-utils": "^2.0.2"
   }
 }
