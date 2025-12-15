@@ -7,17 +7,19 @@
  * Browser Support: Chrome/Edge desktop (requires secure context)
  */
 
-import { initWebGPU, type WebGPUDevice } from "./core/device.js";
-import { createSubpixelPipeline } from "./pipeline/subpixelPipeline.js";
 import { processImage } from "./pipeline/process.js";
 import {
   readTextureToImageData,
   readTextureToUint8Array,
 } from "./utils/readback.js";
-import type { ProcessResult, AdapterOptions, ImageInput } from "./types.js";
+import type { ProcessResult, ImageInput } from "./types.js";
+import tgpu, { type TgpuBindGroupLayout, type TgpuRoot } from "typegpu";
 
 // Import shader source
-import { subpixelShaderSource } from "./shaders/subpixel.js";
+import {
+  loadSubpixelShaderSource,
+  subpixelBindGroupLayout,
+} from "./shaders/subpixel.js";
 
 /**
  * Main processor class for CRT subpixel expansion
@@ -32,9 +34,13 @@ import { subpixelShaderSource } from "./shaders/subpixel.js";
  * ```
  */
 export class CrtSubpixelProcessor {
-  private gpuDevice: WebGPUDevice | null = null;
+  private root: TgpuRoot | null = null;
+  private device: GPUDevice | null = null;
+  private queue: GPUQueue | null = null;
+  private format: GPUTextureFormat | null = null;
   private shaderModule: GPUShaderModule | null = null;
-  private pipeline: ReturnType<typeof createSubpixelPipeline> | null = null;
+  private bindGroupLayout: TgpuBindGroupLayout | null = null;
+  private computePipeline: GPUComputePipeline | null = null;
   private initialized = false;
 
   /**
@@ -44,21 +50,59 @@ export class CrtSubpixelProcessor {
    * @param options Optional adapter configuration
    * @throws Error if WebGPU is not supported or initialization fails
    */
-  async init(options?: AdapterOptions): Promise<void> {
+  async init(): Promise<void> {
     if (this.initialized) {
       return;
     }
 
-    this.gpuDevice = await initWebGPU(options);
-    const { device } = this.gpuDevice;
+    // Check browser support
+    if (!navigator.gpu) {
+      throw new Error(
+        "WebGPU is not supported in this browser. Requires Chrome/Edge with WebGPU enabled.",
+      );
+    }
+
+    this.root = await tgpu.init();
+    this.device = this.root.device;
+    this.queue = this.device.queue;
+    this.format = "rgba8unorm";
+
+    this.device.lost.then((info) => {
+      console.error(`WebGPU device was lost: ${info.message}`);
+    });
+
+    console.log("WebGPU device initialized");
 
     // Compile shader
-    this.shaderModule = device.createShaderModule({
+    const subpixelShaderSource = await loadSubpixelShaderSource();
+    this.shaderModule = this.device.createShaderModule({
+      label: "Subpixel Shader",
       code: subpixelShaderSource,
     });
 
+    // Surface shader compile issues early
+    const info = await this.shaderModule.getCompilationInfo();
+    if (info.messages.some((m) => m.type === "error")) {
+      const message = info.messages
+        .map((m) => `${m.type} @${m.lineNum}:${m.linePos} ${m.message}`)
+        .join("\n");
+      throw new Error(`Shader compilation failed:\n${message}`);
+    }
+
+    console.log("Shader compiled successfully");
+
     // Create pipeline
-    this.pipeline = createSubpixelPipeline(device, this.shaderModule);
+    this.bindGroupLayout = subpixelBindGroupLayout;
+    const pipelineLayout = this.device.createPipelineLayout({
+      bindGroupLayouts: [this.root.unwrap(this.bindGroupLayout)],
+    });
+    this.computePipeline = this.device.createComputePipeline({
+      layout: pipelineLayout,
+      compute: {
+        module: this.shaderModule,
+        entryPoint: "main",
+      },
+    });
 
     this.initialized = true;
   }
@@ -71,26 +115,22 @@ export class CrtSubpixelProcessor {
    * @throws Error if not initialized or processing fails
    */
   async process(input: ImageInput): Promise<ProcessResult> {
-    if (
-      !this.initialized ||
-      !this.gpuDevice ||
-      !this.pipeline ||
-      !this.shaderModule
-    ) {
+    if (!this.initialized) {
       throw new Error(
         "Processor not initialized. Call init() before processing images.",
       );
     }
 
-    const { device, queue, format } = this.gpuDevice;
-
     const result = await processImage(
-      device,
-      queue,
-      this.pipeline,
-      this.shaderModule,
+      this.root!,
+      this.device!,
+      this.queue!,
+      {
+        bindGroupLayout: this.bindGroupLayout!,
+        computePipeline: this.computePipeline!,
+      },
       input,
-      format,
+      this.format!,
     );
 
     return {
@@ -107,14 +147,13 @@ export class CrtSubpixelProcessor {
    * @returns ImageData containing the subpixel-expanded image
    */
   async readbackImageData(result: ProcessResult): Promise<ImageData> {
-    if (!this.gpuDevice) {
+    if (!this.initialized) {
       throw new Error("Processor not initialized");
     }
 
-    const { device, queue } = this.gpuDevice;
     return readTextureToImageData(
-      device,
-      queue,
+      this.device!,
+      this.queue!,
       result.texture,
       result.width,
       result.height,
@@ -128,14 +167,13 @@ export class CrtSubpixelProcessor {
    * @returns Uint8ClampedArray containing raw pixel data (RGBA)
    */
   async readbackUint8Array(result: ProcessResult): Promise<Uint8ClampedArray> {
-    if (!this.gpuDevice) {
+    if (!this.initialized) {
       throw new Error("Processor not initialized");
     }
 
-    const { device, queue } = this.gpuDevice;
     return readTextureToUint8Array(
-      device,
-      queue,
+      this.device!,
+      this.queue!,
       result.texture,
       result.width,
       result.height,
@@ -149,9 +187,13 @@ export class CrtSubpixelProcessor {
   destroy(): void {
     // Note: GPUTexture objects returned from process() should be destroyed
     // by the caller when no longer needed
-    this.gpuDevice = null;
+    this.root = null;
+    this.device = null;
+    this.queue = null;
+    this.format = null;
     this.shaderModule = null;
-    this.pipeline = null;
+    this.bindGroupLayout = null;
+    this.computePipeline = null;
     this.initialized = false;
   }
 }

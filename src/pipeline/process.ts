@@ -2,9 +2,14 @@
  * Image processing pipeline implementation
  */
 
-import { createTextureFromSource } from "webgpu-utils";
 import type { ImageInput } from "../types.js";
-import type { SubpixelPipeline } from "./subpixelPipeline.js";
+import { WORKGROUP_SIZE } from "../shaders/subpixel.js";
+import type { TgpuBindGroupLayout, TgpuRoot } from "typegpu";
+
+type SubpixelPipeline = {
+  bindGroupLayout: TgpuBindGroupLayout;
+  computePipeline: GPUComputePipeline;
+};
 
 function getImageDimensions(image: ImageInput): {
   width: number;
@@ -36,17 +41,55 @@ function getImageDimensions(image: ImageInput): {
  */
 export async function uploadImageToTexture(
   device: GPUDevice,
-  _queue: GPUQueue,
+  queue: GPUQueue,
   image: ImageInput,
   format: GPUTextureFormat,
 ): Promise<{ texture: GPUTexture; width: number; height: number }> {
   const { width, height } = getImageDimensions(image);
 
-  const texture = createTextureFromSource(device, image as unknown, {
+  // Draw into a canvas to guarantee predictable RGBA8 bytes, then upload via writeTexture.
+  const offscreen =
+    image instanceof OffscreenCanvas
+      ? image
+      : new OffscreenCanvas(width, height);
+
+  const ctx = offscreen.getContext("2d");
+  if (!ctx) {
+    throw new Error("Failed to acquire 2D context for upload");
+  }
+
+  if (!(image instanceof OffscreenCanvas)) {
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(image as CanvasImageSource, 0, 0, width, height);
+  }
+
+  const imageData = ctx.getImageData(0, 0, width, height);
+
+  console.log("imageData", imageData);
+
+  const texture = device.createTexture({
+    size: [width, height],
     format,
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-    flipY: false,
+    usage:
+      GPUTextureUsage.TEXTURE_BINDING |
+      GPUTextureUsage.COPY_DST |
+      GPUTextureUsage.RENDER_ATTACHMENT,
   });
+
+  console.log("texture", texture);
+
+  queue.writeTexture(
+    { texture },
+    imageData.data,
+    {
+      bytesPerRow: width * 4,
+      rowsPerImage: height,
+    },
+    { width, height, depthOrArrayLayers: 1 },
+  );
+
+  // Ensure the copy completes before the texture is consumed.
+  await queue.onSubmittedWorkDone();
 
   return { texture, width, height };
 }
@@ -55,10 +98,10 @@ export async function uploadImageToTexture(
  * Process an image through the subpixel pipeline
  */
 export async function processImage(
+  root: TgpuRoot,
   device: GPUDevice,
   queue: GPUQueue,
   pipeline: SubpixelPipeline,
-  shaderModule: GPUShaderModule,
   inputImage: ImageInput,
   format: GPUTextureFormat,
 ): Promise<{ texture: GPUTexture; width: number; height: number }> {
@@ -82,17 +125,11 @@ export async function processImage(
   });
 
   // Create bind group
-  const bindGroup = device.createBindGroup({
-    layout: pipeline.bindGroupLayout,
+  const bindGroup = root.device.createBindGroup({
+    layout: root.unwrap(pipeline.bindGroupLayout),
     entries: [
-      {
-        binding: 0,
-        resource: inputTexture.createView(),
-      },
-      {
-        binding: 1,
-        resource: outputTexture.createView(),
-      },
+      { binding: 0, resource: inputTexture.createView() },
+      { binding: 1, resource: outputTexture.createView() },
     ],
   });
 
@@ -105,16 +142,20 @@ export async function processImage(
 
   // Dispatch compute shader
   // Workgroup size is 8x8, so we need to dispatch enough workgroups
-  const workgroupSizeX = 8;
-  const workgroupSizeY = 8;
+  const [workgroupSizeX, workgroupSizeY] = WORKGROUP_SIZE;
   const dispatchX = Math.ceil(outputWidth / workgroupSizeX);
   const dispatchY = Math.ceil(outputHeight / workgroupSizeY);
 
   computePass.dispatchWorkgroups(dispatchX, dispatchY);
   computePass.end();
 
-  // Submit commands
+  // Submit commands with validation error scope to surface issues
+  device.pushErrorScope("validation");
   queue.submit([encoder.finish()]);
+  const validationError = await device.popErrorScope();
+  if (validationError) {
+    throw new Error(`GPU validation error: ${validationError.message}`);
+  }
 
   // Wait for GPU to finish processing before returning
   await queue.onSubmittedWorkDone();

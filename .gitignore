@@ -119,4 +119,10 @@ dist
 
 # End of https://mrkandreev.name/snippets/gitignore-generator/#Node
 
+# Temporary gitignore so I don't push the test files
 .pnpm-store/
+.vscode/launch.json
+RUNNING.md
+test-images/
+README.md
+test.html

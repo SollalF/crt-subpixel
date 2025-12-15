@@ -23,7 +23,7 @@
     "@commitlint/format": "^20.2.0",
     "@eslint/js": "^9.39.1",
     "@types/node": "^25.0.0",
-    "@webgpu/types": "^0.1.67",
+    "@webgpu/types": "^0.1.68",
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^16.5.0",
@@ -45,6 +45,8 @@
     ]
   },
   "dependencies": {
-    "webgpu-utils": "^2.0.2"
+    "tinyest": "^0.1.2",
+    "typed-binary": "^4.3.2",
+    "typegpu": "^0.8.2"
   }
 }
