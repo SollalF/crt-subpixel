@@ -65,8 +65,6 @@ export async function uploadImageToTexture(
 
   const imageData = ctx.getImageData(0, 0, width, height);
 
-  console.log("imageData", imageData);
-
   const texture = device.createTexture({
     size: [width, height],
     format,
@@ -75,8 +73,6 @@ export async function uploadImageToTexture(
       GPUTextureUsage.COPY_DST |
       GPUTextureUsage.RENDER_ATTACHMENT,
   });
-
-  console.log("texture", texture);
 
   queue.writeTexture(
     { texture },
