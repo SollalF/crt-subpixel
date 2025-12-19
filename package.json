@@ -10,8 +10,8 @@
     "build": "tsc",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "dev": "pnpm dlx http-server . -p 8000",
-    "serve": "pnpm dlx http-server . -p 8000"
+    "dev": "pnpm dlx http-server . -p 8000 -a 0.0.0.0 --cors",
+    "serve": "pnpm dlx http-server . -p 8000 -a 0.0.0.0 --cors"
   },
   "keywords": [],
   "author": "Your Name",
