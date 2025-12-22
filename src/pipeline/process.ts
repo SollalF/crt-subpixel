@@ -4,11 +4,15 @@
 
 import type { ImageInput } from "../types.js";
 import { WORKGROUP_SIZE } from "../shaders/subpixel.js";
-import type { TgpuBindGroupLayout, TgpuRoot } from "typegpu";
+import type {
+  TgpuBindGroupLayout,
+  TgpuRoot,
+  TgpuComputePipeline,
+} from "typegpu";
 
 type SubpixelPipeline = {
   bindGroupLayout: TgpuBindGroupLayout;
-  computePipeline: GPUComputePipeline;
+  computePipeline: TgpuComputePipeline;
 };
 
 function getImageDimensions(image: ImageInput): {
@@ -117,38 +121,22 @@ export async function processImage(
     mipLevelCount: 1,
   });
 
-  // Create bind group
-  const bindGroup = root.device.createBindGroup({
-    layout: root.unwrap(pipeline.bindGroupLayout),
-    entries: [
-      { binding: 0, resource: inputTexture.createView() },
-      { binding: 1, resource: outputTexture.createView() },
-    ],
+  // Create TypeGPU bind group
+  const bindGroup = root.createBindGroup(pipeline.bindGroupLayout, {
+    inputTexture: inputTexture.createView(),
+    outputTexture: outputTexture.createView(),
   });
 
-  // Create command encoder and compute pass
-  const encoder = root.device.createCommandEncoder();
-  const computePass = encoder.beginComputePass();
-
-  computePass.setPipeline(pipeline.computePipeline);
-  computePass.setBindGroup(0, bindGroup);
-
-  // Dispatch compute shader
+  // Dispatch compute shader using TypeGPU pipeline API
   // Workgroup size is 8x8, so we need to dispatch enough workgroups
   const [workgroupSizeX, workgroupSizeY] = WORKGROUP_SIZE;
   const dispatchX = Math.ceil(outputWidth / workgroupSizeX);
   const dispatchY = Math.ceil(outputHeight / workgroupSizeY);
 
-  computePass.dispatchWorkgroups(dispatchX, dispatchY);
-  computePass.end();
-
-  // Submit commands with validation error scope to surface issues
-  root.device.pushErrorScope("validation");
-  root.device.queue.submit([encoder.finish()]);
-  const validationError = await root.device.popErrorScope();
-  if (validationError) {
-    throw new Error(`GPU validation error: ${validationError.message}`);
-  }
+  // Dispatch compute shader - TypeGPU handles command encoding and submission
+  pipeline.computePipeline
+    .with(bindGroup)
+    .dispatchWorkgroups(dispatchX, dispatchY);
 
   // Wait for GPU to finish processing before returning
   await root.device.queue.onSubmittedWorkDone();

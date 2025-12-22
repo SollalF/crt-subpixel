@@ -13,12 +13,22 @@ import {
   readTextureToUint8Array,
 } from "./utils/readback.js";
 import type { ProcessResult, ImageInput } from "./types.js";
-import tgpu, { type TgpuBindGroupLayout, type TgpuRoot } from "typegpu";
+import tgpu, {
+  type TgpuBindGroupLayout,
+  type TgpuRoot,
+  type TgpuComputePipeline,
+} from "typegpu";
 
-// Import shader source
+// Type assertion helper - tgpu.init() returns ExperimentalTgpuRoot at runtime
+// which extends WithBinding and has withCompute method
+interface ExperimentalTgpuRoot extends TgpuRoot {
+  withCompute(entryFn: unknown): { createPipeline: () => TgpuComputePipeline };
+}
+
+// Import compute function and bind group layout
 import {
-  loadSubpixelShaderSource,
   subpixelBindGroupLayout,
+  subpixelComputeFn,
 } from "./shaders/subpixel.js";
 
 /**
@@ -36,9 +46,8 @@ import {
 export class CrtSubpixelProcessor {
   private root: TgpuRoot | null = null;
   private format: GPUTextureFormat | null = null;
-  private shaderModule: GPUShaderModule | null = null;
   private bindGroupLayout: TgpuBindGroupLayout | null = null;
-  private computePipeline: GPUComputePipeline | null = null;
+  private computePipeline: TgpuComputePipeline | null = null;
   private initialized = false;
 
   /**
@@ -70,36 +79,15 @@ export class CrtSubpixelProcessor {
 
     console.log("WebGPU device initialized");
 
-    // Compile shader
-    const subpixelShaderSource = await loadSubpixelShaderSource();
-    this.shaderModule = this.root.device.createShaderModule({
-      label: "Subpixel Shader",
-      code: subpixelShaderSource,
-    });
-
-    // Surface shader compile issues early
-    const info = await this.shaderModule.getCompilationInfo();
-    if (info.messages.some((m) => m.type === "error")) {
-      const message = info.messages
-        .map((m) => `${m.type} @${m.lineNum}:${m.linePos} ${m.message}`)
-        .join("\n");
-      throw new Error(`Shader compilation failed:\n${message}`);
-    }
-
-    console.log("Shader compiled successfully");
-
-    // Create pipeline
+    // Create compute pipeline using TypeGPU
+    // Note: tgpu.init() returns ExperimentalTgpuRoot which has withCompute method
     this.bindGroupLayout = subpixelBindGroupLayout;
-    const pipelineLayout = this.root.device.createPipelineLayout({
-      bindGroupLayouts: [this.root.unwrap(this.bindGroupLayout)],
-    });
-    this.computePipeline = this.root.device.createComputePipeline({
-      layout: pipelineLayout,
-      compute: {
-        module: this.shaderModule,
-        entryPoint: "main",
-      },
-    });
+    const experimentalRoot = this.root as unknown as ExperimentalTgpuRoot;
+    this.computePipeline = experimentalRoot
+      .withCompute(subpixelComputeFn)
+      .createPipeline();
+
+    console.log("Compute pipeline created successfully");
 
     this.initialized = true;
   }
@@ -182,7 +170,6 @@ export class CrtSubpixelProcessor {
     // by the caller when no longer needed
     this.root = null;
     this.format = null;
-    this.shaderModule = null;
     this.bindGroupLayout = null;
     this.computePipeline = null;
     this.initialized = false;

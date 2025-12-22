@@ -34,7 +34,8 @@
     "sharp": "^0.34.5",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.49.0"
+    "typescript-eslint": "^8.49.0",
+    "unplugin-typegpu": "^0.8.0"
   },
   "lint-staged": {
     "*.{ts,js}": [
