@@ -40,8 +40,7 @@ function getImageDimensions(image: ImageInput): {
  * Upload an image to a GPU texture
  */
 export async function uploadImageToTexture(
-  device: GPUDevice,
-  queue: GPUQueue,
+  root: TgpuRoot,
   image: ImageInput,
   format: GPUTextureFormat,
 ): Promise<{ texture: GPUTexture; width: number; height: number }> {
@@ -65,7 +64,7 @@ export async function uploadImageToTexture(
 
   const imageData = ctx.getImageData(0, 0, width, height);
 
-  const texture = device.createTexture({
+  const texture = root.device.createTexture({
     size: [width, height],
     format,
     usage:
@@ -74,7 +73,7 @@ export async function uploadImageToTexture(
       GPUTextureUsage.RENDER_ATTACHMENT,
   });
 
-  queue.writeTexture(
+  root.device.queue.writeTexture(
     { texture },
     imageData.data,
     {
@@ -85,7 +84,7 @@ export async function uploadImageToTexture(
   );
 
   // Ensure the copy completes before the texture is consumed.
-  await queue.onSubmittedWorkDone();
+  await root.device.queue.onSubmittedWorkDone();
 
   return { texture, width, height };
 }
@@ -95,8 +94,6 @@ export async function uploadImageToTexture(
  */
 export async function processImage(
   root: TgpuRoot,
-  device: GPUDevice,
-  queue: GPUQueue,
   pipeline: SubpixelPipeline,
   inputImage: ImageInput,
   format: GPUTextureFormat,
@@ -106,14 +103,14 @@ export async function processImage(
     texture: inputTexture,
     width: inputWidth,
     height: inputHeight,
-  } = await uploadImageToTexture(device, queue, inputImage, format);
+  } = await uploadImageToTexture(root, inputImage, format);
 
   // Calculate output dimensions (3x expansion)
   const outputWidth = inputWidth * 3;
   const outputHeight = inputHeight * 3;
 
   // Create output texture
-  const outputTexture = device.createTexture({
+  const outputTexture = root.device.createTexture({
     size: [outputWidth, outputHeight],
     format,
     usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC,
@@ -130,7 +127,7 @@ export async function processImage(
   });
 
   // Create command encoder and compute pass
-  const encoder = device.createCommandEncoder();
+  const encoder = root.device.createCommandEncoder();
   const computePass = encoder.beginComputePass();
 
   computePass.setPipeline(pipeline.computePipeline);
@@ -146,15 +143,15 @@ export async function processImage(
   computePass.end();
 
   // Submit commands with validation error scope to surface issues
-  device.pushErrorScope("validation");
-  queue.submit([encoder.finish()]);
-  const validationError = await device.popErrorScope();
+  root.device.pushErrorScope("validation");
+  root.device.queue.submit([encoder.finish()]);
+  const validationError = await root.device.popErrorScope();
   if (validationError) {
     throw new Error(`GPU validation error: ${validationError.message}`);
   }
 
   // Wait for GPU to finish processing before returning
-  await queue.onSubmittedWorkDone();
+  await root.device.queue.onSubmittedWorkDone();
 
   // Clean up input texture (output texture is returned)
   inputTexture.destroy();

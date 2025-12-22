@@ -35,8 +35,6 @@ import {
  */
 export class CrtSubpixelProcessor {
   private root: TgpuRoot | null = null;
-  private device: GPUDevice | null = null;
-  private queue: GPUQueue | null = null;
   private format: GPUTextureFormat | null = null;
   private shaderModule: GPUShaderModule | null = null;
   private bindGroupLayout: TgpuBindGroupLayout | null = null;
@@ -52,6 +50,7 @@ export class CrtSubpixelProcessor {
    */
   async init(): Promise<void> {
     if (this.initialized) {
+      console.log("Processor already initialized");
       return;
     }
 
@@ -63,11 +62,9 @@ export class CrtSubpixelProcessor {
     }
 
     this.root = await tgpu.init();
-    this.device = this.root.device;
-    this.queue = this.device.queue;
     this.format = "rgba8unorm";
 
-    this.device.lost.then((info) => {
+    this.root.device.lost.then((info) => {
       console.error(`WebGPU device was lost: ${info.message}`);
     });
 
@@ -75,7 +72,7 @@ export class CrtSubpixelProcessor {
 
     // Compile shader
     const subpixelShaderSource = await loadSubpixelShaderSource();
-    this.shaderModule = this.device.createShaderModule({
+    this.shaderModule = this.root.device.createShaderModule({
       label: "Subpixel Shader",
       code: subpixelShaderSource,
     });
@@ -93,10 +90,10 @@ export class CrtSubpixelProcessor {
 
     // Create pipeline
     this.bindGroupLayout = subpixelBindGroupLayout;
-    const pipelineLayout = this.device.createPipelineLayout({
+    const pipelineLayout = this.root.device.createPipelineLayout({
       bindGroupLayouts: [this.root.unwrap(this.bindGroupLayout)],
     });
-    this.computePipeline = this.device.createComputePipeline({
+    this.computePipeline = this.root.device.createComputePipeline({
       layout: pipelineLayout,
       compute: {
         module: this.shaderModule,
@@ -123,8 +120,6 @@ export class CrtSubpixelProcessor {
 
     const result = await processImage(
       this.root!,
-      this.device!,
-      this.queue!,
       {
         bindGroupLayout: this.bindGroupLayout!,
         computePipeline: this.computePipeline!,
@@ -152,8 +147,7 @@ export class CrtSubpixelProcessor {
     }
 
     return readTextureToImageData(
-      this.device!,
-      this.queue!,
+      this.root!,
       result.texture,
       result.width,
       result.height,
@@ -172,8 +166,7 @@ export class CrtSubpixelProcessor {
     }
 
     return readTextureToUint8Array(
-      this.device!,
-      this.queue!,
+      this.root!,
       result.texture,
       result.width,
       result.height,
@@ -188,8 +181,6 @@ export class CrtSubpixelProcessor {
     // Note: GPUTexture objects returned from process() should be destroyed
     // by the caller when no longer needed
     this.root = null;
-    this.device = null;
-    this.queue = null;
     this.format = null;
     this.shaderModule = null;
     this.bindGroupLayout = null;

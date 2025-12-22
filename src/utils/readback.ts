@@ -2,12 +2,13 @@
  * Utilities for reading back GPU textures to CPU memory
  */
 
+import type { TgpuRoot } from "typegpu";
+
 /**
  * Read a GPUTexture back to ImageData
  */
 export async function readTextureToImageData(
-  device: GPUDevice,
-  queue: GPUQueue,
+  root: TgpuRoot,
   texture: GPUTexture,
   width: number,
   height: number,
@@ -26,13 +27,13 @@ export async function readTextureToImageData(
   const bytesPerRow = Math.ceil((width * bytesPerPixel) / 256) * 256;
   const bufferSize = bytesPerRow * height;
 
-  const buffer = device.createBuffer({
+  const buffer = root.device.createBuffer({
     size: bufferSize,
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
   });
 
   // Copy texture to buffer
-  const encoder = device.createCommandEncoder();
+  const encoder = root.device.createCommandEncoder();
   encoder.copyTextureToBuffer(
     { texture },
     {
@@ -43,10 +44,10 @@ export async function readTextureToImageData(
     { width, height },
   );
 
-  queue.submit([encoder.finish()]);
+  root.device.queue.submit([encoder.finish()]);
 
   // Wait for GPU to finish copying
-  await queue.onSubmittedWorkDone();
+  await root.device.queue.onSubmittedWorkDone();
 
   // Map buffer and read data
   await buffer.mapAsync(GPUMapMode.READ);
@@ -82,18 +83,11 @@ export async function readTextureToImageData(
  * Read a GPUTexture back to Uint8ClampedArray
  */
 export async function readTextureToUint8Array(
-  device: GPUDevice,
-  queue: GPUQueue,
+  root: TgpuRoot,
   texture: GPUTexture,
   width: number,
   height: number,
 ): Promise<Uint8ClampedArray> {
-  const imageData = await readTextureToImageData(
-    device,
-    queue,
-    texture,
-    width,
-    height,
-  );
+  const imageData = await readTextureToImageData(root, texture, width, height);
   return imageData.data;
 }
