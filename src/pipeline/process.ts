@@ -10,119 +10,71 @@ import type {
   TgpuComputePipeline,
 } from "typegpu";
 
-type SubpixelPipeline = {
-  bindGroupLayout: TgpuBindGroupLayout;
-  computePipeline: TgpuComputePipeline;
-};
-
-function getImageDimensions(image: ImageInput): {
-  width: number;
-  height: number;
-} {
-  if (image instanceof ImageBitmap) {
-    return { width: image.width, height: image.height };
-  }
-  if (image instanceof ImageData) {
-    return { width: image.width, height: image.height };
-  }
-  if (image instanceof HTMLImageElement) {
-    return {
-      width: image.naturalWidth || image.width,
-      height: image.naturalHeight || image.height,
-    };
-  }
-  if (image instanceof HTMLCanvasElement || image instanceof OffscreenCanvas) {
-    return { width: image.width, height: image.height };
-  }
-
-  throw new Error(
-    "Unsupported image input type. Expected bitmap, data, or canvas.",
-  );
-}
-
-/**
- * Upload an image to a GPU texture
- */
-export async function uploadImageToTexture(
-  root: TgpuRoot,
-  image: ImageInput,
-  format: GPUTextureFormat,
-): Promise<{ texture: GPUTexture; width: number; height: number }> {
-  const { width, height } = getImageDimensions(image);
-
-  // Draw into a canvas to guarantee predictable RGBA8 bytes, then upload via writeTexture.
-  const offscreen =
-    image instanceof OffscreenCanvas
-      ? image
-      : new OffscreenCanvas(width, height);
-
-  const ctx = offscreen.getContext("2d");
-  if (!ctx) {
-    throw new Error("Failed to acquire 2D context for upload");
-  }
-
-  if (!(image instanceof OffscreenCanvas)) {
-    ctx.clearRect(0, 0, width, height);
-    ctx.drawImage(image as CanvasImageSource, 0, 0, width, height);
-  }
-
-  const imageData = ctx.getImageData(0, 0, width, height);
-
-  const texture = root.device.createTexture({
-    size: [width, height],
-    format,
-    usage:
-      GPUTextureUsage.TEXTURE_BINDING |
-      GPUTextureUsage.COPY_DST |
-      GPUTextureUsage.RENDER_ATTACHMENT,
-  });
-
-  root.device.queue.writeTexture(
-    { texture },
-    imageData.data,
-    {
-      bytesPerRow: width * 4,
-      rowsPerImage: height,
-    },
-    { width, height, depthOrArrayLayers: 1 },
-  );
-
-  // Ensure the copy completes before the texture is consumed.
-  await root.device.queue.onSubmittedWorkDone();
-
-  return { texture, width, height };
-}
-
 /**
  * Process an image through the subpixel pipeline
  */
 export async function processImage(
   root: TgpuRoot,
-  pipeline: SubpixelPipeline,
+  bindGroupLayout: TgpuBindGroupLayout,
+  computePipeline: TgpuComputePipeline,
   inputImage: ImageInput,
   format: GPUTextureFormat,
 ): Promise<{ texture: GPUTexture; width: number; height: number }> {
-  // Upload input image
-  const {
-    texture: inputTexture,
-    width: inputWidth,
-    height: inputHeight,
-  } = await uploadImageToTexture(root, inputImage, format);
+  const inputWidth = inputImage.width;
+  const inputHeight = inputImage.height;
+
+  console.log("Uploading image to texture", inputWidth, inputHeight);
+
+  // Create sampled texture directly using WebGPU API
+  // This avoids TypeGPU wrapper issues and gives us direct access to the texture
+  const inputTexture = root.device.createTexture({
+    size: [inputWidth, inputHeight],
+    format,
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+  });
+
+  // Convert ImageBitmap to ImageData and upload to texture
+  const canvas = new OffscreenCanvas(inputWidth, inputHeight);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    throw new Error("Failed to acquire 2D context");
+  }
+  ctx.drawImage(inputImage, 0, 0);
+  const imageData = ctx.getImageData(0, 0, inputWidth, inputHeight);
+
+  // Write image data directly to the texture
+  root.device.queue.writeTexture(
+    { texture: inputTexture },
+    imageData.data,
+    { bytesPerRow: inputWidth * 4, rowsPerImage: inputHeight },
+    { width: inputWidth, height: inputHeight },
+  );
+  await root.device.queue.onSubmittedWorkDone();
+
+  // Debug: Log first pixel from the ImageData we just created
+  console.log(
+    `Input texture first pixel RGBA: ${imageData.data[0]}, ${imageData.data[1]}, ${imageData.data[2]}, ${imageData.data[3]}`,
+  );
 
   // Calculate output dimensions (3x expansion)
   const outputWidth = inputWidth * 3;
   const outputHeight = inputHeight * 3;
 
   // Create output texture
+  // Include TEXTURE_BINDING so it can be sampled in render passes (e.g., for canvas display)
   const outputTexture = root.device.createTexture({
     size: [outputWidth, outputHeight],
     format,
-    usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC,
+    usage:
+      GPUTextureUsage.STORAGE_BINDING |
+      GPUTextureUsage.COPY_SRC |
+      GPUTextureUsage.TEXTURE_BINDING,
     mipLevelCount: 1,
   });
 
   // Create TypeGPU bind group
-  const bindGroup = root.createBindGroup(pipeline.bindGroupLayout, {
+  // Use the GPUTexture view directly
+  const bindGroup = root.createBindGroup(bindGroupLayout, {
     inputTexture: inputTexture.createView(),
     outputTexture: outputTexture.createView(),
   });
@@ -134,14 +86,13 @@ export async function processImage(
   const dispatchY = Math.ceil(outputHeight / workgroupSizeY);
 
   // Dispatch compute shader - TypeGPU handles command encoding and submission
-  pipeline.computePipeline
-    .with(bindGroup)
-    .dispatchWorkgroups(dispatchX, dispatchY);
+  computePipeline.with(bindGroup).dispatchWorkgroups(dispatchX, dispatchY);
 
   // Wait for GPU to finish processing before returning
   await root.device.queue.onSubmittedWorkDone();
 
   // Clean up input texture (output texture is returned)
+  // Note: inputTexture is a GPUTexture, not a TypeGPU texture, so we use destroy() directly
   inputTexture.destroy();
 
   return {

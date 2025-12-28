@@ -18,9 +18,4 @@ export interface AdapterOptions {
   forceFallbackAdapter?: boolean;
 }
 
-export type ImageInput =
-  | ImageBitmap
-  | ImageData
-  | HTMLImageElement
-  | HTMLCanvasElement
-  | OffscreenCanvas;
+export type ImageInput = ImageBitmap;

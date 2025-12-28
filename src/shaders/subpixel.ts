@@ -1,16 +1,20 @@
 import tgpu from "typegpu";
 import * as d from "typegpu/data";
+import * as std from "typegpu/std";
 
 /**
  * TypeGPU bind group layout for the subpixel shader.
  * We keep bindings named for clarity:
- * - inputTexture: sampled 2D float texture
+ * - inputTexture: sampled 2D rgba8 texture (read-only, can use TypeGPU's write())
+ * - sampler: sampler for reading the input texture
  * - outputTexture: writable 2D rgba8 storage texture
  */
 export const subpixelBindGroupLayout = tgpu
   .bindGroupLayout({
-    inputTexture: { texture: d.texture2d() },
-    outputTexture: { storageTexture: d.textureStorage2d("rgba8unorm") },
+    inputTexture: { texture: d.texture2d(d.f32) },
+    outputTexture: {
+      storageTexture: d.textureStorage2d("rgba8unorm", "write-only"),
+    },
   })
   .$idx(0);
 
@@ -25,10 +29,14 @@ export const WORKGROUP_SIZE = [8, 8] as const;
 export const subpixelComputeFn = tgpu["~unstable"].computeFn({
   in: { global_invocation_id: d.builtin.globalInvocationId },
   workgroupSize: [...WORKGROUP_SIZE],
-})(`
-  let outputSize = textureDimensions(outputTexture);
-  let outputX = global_invocation_id.x;
-  let outputY = global_invocation_id.y;
+})((input) => {
+  // Access textures directly through the bind group layout
+  // Get texture dimensions and invocation coordinates
+  const outputSize = std.textureDimensions(
+    subpixelBindGroupLayout.$.outputTexture,
+  ) as d.v2u;
+  const outputX = input.global_invocation_id.x;
+  const outputY = input.global_invocation_id.y;
 
   // Bounds check
   if (outputX >= outputSize.x || outputY >= outputSize.y) {
@@ -37,37 +45,48 @@ export const subpixelComputeFn = tgpu["~unstable"].computeFn({
 
   // Map output coordinates back to input pixel coordinates
   // Each input pixel becomes a 3x3 block, so divide by 3
-  let inputX = outputX / 3u;
-  let inputY = outputY / 3u;
+  // Use integer division to get the input pixel coordinate
+  const inputX = d.i32(outputX / 3);
+  const inputY = d.i32(outputY / 3);
 
   // Get the position within the 3x3 block (0, 1, or 2)
-  let blockX = outputX % 3u;
-  let blockY = outputY % 3u;
+  const blockX = outputX % 3;
 
-  // Sample the input pixel
-  let inputSize = textureDimensions(inputTexture);
-  if (inputX >= inputSize.x || inputY >= inputSize.y) {
+  // Load the input pixel directly using textureLoad (compute shaders can't use textureSample)
+  // textureLoad uses integer coordinates, not UV coordinates
+  const inputSize = std.textureDimensions(
+    subpixelBindGroupLayout.$.inputTexture,
+  ) as d.v2u;
+
+  // Bounds check for input coordinates (convert to u32 for comparison)
+  if (d.u32(inputX) >= inputSize.x || d.u32(inputY) >= inputSize.y) {
     return;
   }
 
-  // Load the input pixel directly (no interpolation needed)
-  let inputColor = textureLoad(inputTexture, vec2<i32>(i32(inputX), i32(inputY)), 0);
+  const inputColor = std.textureLoad(
+    subpixelBindGroupLayout.$.inputTexture,
+    d.vec2i(inputX, inputY),
+    0, // mip level
+  ) as d.v4f;
 
   // Create the subpixel pattern: vertical RGB stripes
   // blockX = 0 -> Red channel, blockX = 1 -> Green channel, blockX = 2 -> Blue channel
-  var outputColor = vec4<f32>(0.0, 0.0, 0.0, inputColor.a);
-
-  if (blockX == 0u) {
-    // Red stripe: max out red, zero green and blue
-    outputColor.r = inputColor.r;
-  } else if (blockX == 1u) {
-    // Green stripe: max out green, zero red and blue
-    outputColor.g = inputColor.g;
+  let outputColor = inputColor; // Initialize with input color
+  if (blockX === 0) {
+    // Red stripe: use red channel, zero green and blue
+    outputColor = d.vec4f(inputColor.x, 0.0, 0.0, inputColor.w);
+  } else if (blockX === 1) {
+    // Green stripe: use green channel, zero red and blue
+    outputColor = d.vec4f(0.0, inputColor.y, 0.0, inputColor.w);
   } else {
-    // Blue stripe: max out blue, zero red and green
-    outputColor.b = inputColor.b;
+    // Blue stripe: use blue channel, zero red and green
+    outputColor = d.vec4f(0.0, 0.0, inputColor.z, inputColor.w);
   }
 
   // Write to output texture
-  textureStore(outputTexture, vec2<i32>(i32(outputX), i32(outputY)), outputColor);
-`);
+  std.textureStore(
+    subpixelBindGroupLayout.$.outputTexture,
+    d.vec2i(outputX, outputY),
+    outputColor,
+  );
+});
