@@ -12,21 +12,14 @@ import {
   readTextureToImageData,
   readTextureToUint8Array,
 } from "./utils/readback.js";
-import type { ProcessResult, ImageInput } from "./types.js";
-import tgpu, {
-  type TgpuBindGroupLayout,
-  type TgpuRoot,
-  type TgpuComputePipeline,
-} from "typegpu";
+import type { ProcessResult } from "./types.js";
+import tgpu, { type TgpuRoot, type TgpuComputePipeline } from "typegpu";
 import * as d from "typegpu/data";
 import * as std from "typegpu/std";
 import { fullScreenTriangle } from "typegpu/common";
 
 // Import compute function and bind group layout
-import {
-  subpixelBindGroupLayout,
-  subpixelComputeFn,
-} from "./shaders/subpixel.js";
+import { subpixelComputeFn } from "./shaders/subpixel.js";
 
 /**
  * Main processor class for CRT subpixel expansion
@@ -42,7 +35,6 @@ import {
  */
 export class CrtSubpixelProcessor {
   private root: TgpuRoot | null = null;
-  private bindGroupLayout: TgpuBindGroupLayout | null = null;
   private computePipeline: TgpuComputePipeline | null = null;
   private initialized = false;
 
@@ -70,7 +62,6 @@ export class CrtSubpixelProcessor {
 
     // Create compute pipeline using TypeGPU
     // Use the '~unstable' API which is properly typed and includes withCompute
-    this.bindGroupLayout = subpixelBindGroupLayout;
     this.computePipeline = this.root["~unstable"]
       .withCompute(subpixelComputeFn)
       .createPipeline();
@@ -87,7 +78,7 @@ export class CrtSubpixelProcessor {
    * @returns Result containing output texture and dimensions (3x input size)
    * @throws Error if not initialized or processing fails
    */
-  async process(input: ImageInput): Promise<ProcessResult> {
+  async process(input: ImageBitmap): Promise<ProcessResult> {
     if (!this.initialized) {
       throw new Error(
         "Processor not initialized. Call init() before processing images.",
@@ -233,11 +224,10 @@ export class CrtSubpixelProcessor {
     // Note: Texture objects returned from process() should be destroyed
     // by the caller when no longer needed
     this.root = null;
-    this.bindGroupLayout = null;
     this.computePipeline = null;
     this.initialized = false;
   }
 }
 
 // Re-export types
-export type { ProcessResult, ImageInput } from "./types.js";
+export type { ProcessResult } from "./types.js";

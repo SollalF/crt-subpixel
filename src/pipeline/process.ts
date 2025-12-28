@@ -1,8 +1,6 @@
 /**
  * Image processing pipeline implementation
  */
-
-import type { ImageInput } from "../types.js";
 import {
   WORKGROUP_SIZE,
   subpixelBindGroupLayout,
@@ -16,7 +14,7 @@ import type { TgpuRoot, TgpuComputePipeline } from "typegpu";
 export async function processImage(
   root: TgpuRoot,
   computePipeline: TgpuComputePipeline,
-  inputImage: ImageInput,
+  inputImage: ImageBitmap,
 ) {
   const inputWidth = inputImage.width;
   const inputHeight = inputImage.height;

@@ -12,5 +12,3 @@ export interface ProcessResult {
   /** Height of the output texture (3x the input height) */
   height: number;
 }
-
-export type ImageInput = ImageBitmap;
