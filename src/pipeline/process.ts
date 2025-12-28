@@ -3,65 +3,59 @@
  */
 
 import type { ImageInput } from "../types.js";
-import { WORKGROUP_SIZE } from "../shaders/subpixel.js";
-import type {
-  TgpuBindGroupLayout,
-  TgpuRoot,
-  TgpuComputePipeline,
-} from "typegpu";
+import {
+  WORKGROUP_SIZE,
+  subpixelBindGroupLayout,
+} from "../shaders/subpixel.js";
+import type { TgpuRoot, TgpuComputePipeline } from "typegpu";
 
 /**
  * Process an image through the subpixel pipeline
+ * Uses "rgba8unorm" format (hardcoded to match shader requirements)
  */
 export async function processImage(
   root: TgpuRoot,
-  bindGroupLayout: TgpuBindGroupLayout,
   computePipeline: TgpuComputePipeline,
   inputImage: ImageInput,
-  format: GPUTextureFormat,
-): Promise<{ texture: GPUTexture; width: number; height: number }> {
+) {
   const inputWidth = inputImage.width;
   const inputHeight = inputImage.height;
 
   console.log("Uploading image to texture", inputWidth, inputHeight);
 
-  // Create sampled texture directly using WebGPU API
-  // This avoids TypeGPU wrapper issues and gives us direct access to the texture
-  const inputTexture = root.device.createTexture({
-    size: [inputWidth, inputHeight],
-    format,
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-  });
+  // Create sampled texture using TypeGPU
+  // Format is hardcoded to "rgba8unorm" to match shader requirements
+  // Needs render usage for write() to copy ImageBitmap data (render includes copy destination)
+  const inputTexture = root["~unstable"]
+    .createTexture({
+      size: [inputWidth, inputHeight],
+      format: "rgba8unorm",
+    })
+    .$usage("sampled")
+    .$usage("render");
 
   // Copy ImageBitmap directly to texture (no ImageData conversion needed!)
-  root.device.queue.copyExternalImageToTexture(
-    { source: inputImage },
-    { texture: inputTexture },
-    { width: inputWidth, height: inputHeight },
-  );
-  await root.device.queue.onSubmittedWorkDone();
+  inputTexture.write(inputImage);
 
   // Calculate output dimensions (3x expansion)
   const outputWidth = inputWidth * 3;
   const outputHeight = inputHeight * 3;
 
-  // Create output texture
-  // Include TEXTURE_BINDING so it can be sampled in render passes (e.g., for canvas display)
-  const outputTexture = root.device.createTexture({
-    size: [outputWidth, outputHeight],
-    format,
-    usage:
-      GPUTextureUsage.STORAGE_BINDING |
-      GPUTextureUsage.COPY_SRC |
-      GPUTextureUsage.TEXTURE_BINDING,
-    mipLevelCount: 1,
-  });
+  // Create output texture with storage binding
+  // Format is hardcoded to "rgba8unorm" to match shader requirements
+  const outputTexture = root["~unstable"]
+    .createTexture({
+      size: [outputWidth, outputHeight],
+      format: "rgba8unorm",
+    })
+    .$usage("storage", "sampled"); // For render passes (e.g., canvas display)
 
   // Create TypeGPU bind group
-  // Use the GPUTexture view directly
-  const bindGroup = root.createBindGroup(bindGroupLayout, {
-    inputTexture: inputTexture.createView(),
-    outputTexture: outputTexture.createView(),
+  // TypeGPU bind groups accept texture objects directly (not views)
+  // Using the layout directly preserves type information for proper type inference
+  const bindGroup = root.createBindGroup(subpixelBindGroupLayout, {
+    inputTexture: inputTexture,
+    outputTexture: outputTexture,
   });
 
   // Dispatch compute shader using TypeGPU pipeline API
@@ -77,7 +71,6 @@ export async function processImage(
   await root.device.queue.onSubmittedWorkDone();
 
   // Clean up input texture (output texture is returned)
-  // Note: inputTexture is a GPUTexture, not a TypeGPU texture, so we use destroy() directly
   inputTexture.destroy();
 
   return {

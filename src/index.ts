@@ -18,6 +18,9 @@ import tgpu, {
   type TgpuRoot,
   type TgpuComputePipeline,
 } from "typegpu";
+import * as d from "typegpu/data";
+import * as std from "typegpu/std";
+import { fullScreenTriangle } from "typegpu/common";
 
 // Import compute function and bind group layout
 import {
@@ -39,7 +42,6 @@ import {
  */
 export class CrtSubpixelProcessor {
   private root: TgpuRoot | null = null;
-  private format: GPUTextureFormat | null = null;
   private bindGroupLayout: TgpuBindGroupLayout | null = null;
   private computePipeline: TgpuComputePipeline | null = null;
   private initialized = false;
@@ -65,7 +67,6 @@ export class CrtSubpixelProcessor {
     }
 
     this.root = await tgpu.init();
-    this.format = "rgba8unorm";
 
     this.root.device.lost.then((info) => {
       console.error(`WebGPU device was lost: ${info.message}`);
@@ -99,13 +100,7 @@ export class CrtSubpixelProcessor {
       );
     }
 
-    const result = await processImage(
-      this.root!,
-      this.bindGroupLayout!,
-      this.computePipeline!,
-      input,
-      this.format!,
-    );
+    const result = await processImage(this.root!, this.computePipeline!, input);
 
     return {
       texture: result.texture,
@@ -187,122 +182,52 @@ export class CrtSubpixelProcessor {
     canvas.width = result.width;
     canvas.height = result.height;
 
-    // Get the current texture from the canvas
-    const canvasTexture = context.getCurrentTexture();
+    // Create TypeGPU bind group layout for blit shader
+    const blitLayout = tgpu
+      .bindGroupLayout({
+        inputTexture: { texture: d.texture2d(d.f32) },
+        inputSampler: { sampler: "filtering" },
+      })
+      .$idx(0);
 
-    // Use a render pass to copy the texture (handles format conversion)
-    // The canvas format (BGRA8Unorm) may differ from our texture format (RGBA8Unorm)
-    const encoder = this.root!.device.createCommandEncoder();
-
-    // Create a simple render pass that blits the texture
-    const renderPass = encoder.beginRenderPass({
-      colorAttachments: [
-        {
-          view: canvasTexture.createView(),
-          loadOp: "clear",
-          clearValue: { r: 0, g: 0, b: 0, a: 1 },
-          storeOp: "store",
-        },
-      ],
+    // Create TypeGPU sampler
+    const sampler = this.root!["~unstable"].createSampler({
+      magFilter: "linear",
+      minFilter: "linear",
     });
 
-    // Create a simple blit pipeline on the fly
-    // We'll use a fullscreen quad shader to sample and render the texture
-    const blitShaderModule = this.root!.device.createShaderModule({
-      code: `
-        struct VertexOutput {
-          @builtin(position) position: vec4<f32>,
-          @location(0) uv: vec2<f32>,
-        };
-
-        @vertex
-        fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
-          var output: VertexOutput;
-          // Fullscreen triangle
-          let x = f32((vertexIndex << 1u) & 2u) * 2.0 - 1.0;
-          let y = f32(vertexIndex & 2u) * 2.0 - 1.0;
-          output.position = vec4<f32>(x, y, 0.0, 1.0);
-          output.uv = vec2<f32>(x * 0.5 + 0.5, 1.0 - (y * 0.5 + 0.5));
-          return output;
-        }
-
-        @group(0) @binding(0) var inputTexture: texture_2d<f32>;
-        @group(0) @binding(1) var inputSampler: sampler;
-
-        @fragment
-        fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-          return textureSample(inputTexture, inputSampler, input.uv);
-        }
-      `,
+    // Create TypeGPU fragment function for blitting
+    const blitFragment = tgpu["~unstable"].fragmentFn({
+      in: { uv: d.vec2f },
+      out: d.vec4f,
+    })((input) => {
+      return std.textureSample(blitLayout.$.inputTexture, sampler.$, input.uv);
     });
 
-    const blitBindGroupLayout = this.root!.device.createBindGroupLayout({
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: {
-            sampleType: "float",
-            viewDimension: "2d",
-          },
-        },
-        {
-          binding: 1,
-          visibility: GPUShaderStage.FRAGMENT,
-          sampler: {
-            type: "filtering",
-          },
-        },
-      ],
+    // Create TypeGPU render pipeline
+    const renderPipeline = this.root!["~unstable"].withVertex(
+      fullScreenTriangle,
+      {},
+    )
+      .withFragment(blitFragment, { format: canvasFormat })
+      .createPipeline();
+
+    // Create TypeGPU bind group (textures work directly!)
+    const blitBindGroup = this.root!.createBindGroup(blitLayout, {
+      inputTexture: result.texture,
+      inputSampler: sampler,
     });
 
-    const blitPipeline = this.root!.device.createRenderPipeline({
-      layout: this.root!.device.createPipelineLayout({
-        bindGroupLayouts: [blitBindGroupLayout],
-      }),
-      vertex: {
-        module: blitShaderModule,
-        entryPoint: "vs_main",
-      },
-      fragment: {
-        module: blitShaderModule,
-        entryPoint: "fs_main",
-        targets: [
-          {
-            format: canvasFormat,
-          },
-        ],
-      },
-      primitive: {
-        topology: "triangle-list",
-      },
-    });
-
-    const sampler = this.root!.device.createSampler({
-      magFilter: "nearest",
-      minFilter: "nearest",
-    });
-
-    const blitBindGroup = this.root!.device.createBindGroup({
-      layout: blitBindGroupLayout,
-      entries: [
-        {
-          binding: 0,
-          resource: result.texture.createView(),
-        },
-        {
-          binding: 1,
-          resource: sampler,
-        },
-      ],
-    });
-
-    renderPass.setPipeline(blitPipeline);
-    renderPass.setBindGroup(0, blitBindGroup);
-    renderPass.draw(3, 1, 0, 0);
-    renderPass.end();
-
-    this.root!.device.queue.submit([encoder.finish()]);
+    // Render to canvas using TypeGPU's render pass API
+    renderPipeline
+      .withColorAttachment({
+        view: context.getCurrentTexture().createView(),
+        loadOp: "clear",
+        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        storeOp: "store",
+      })
+      .with(blitBindGroup)
+      .draw(3);
   }
 
   /**
@@ -313,7 +238,6 @@ export class CrtSubpixelProcessor {
     // Note: GPUTexture objects returned from process() should be destroyed
     // by the caller when no longer needed
     this.root = null;
-    this.format = null;
     this.bindGroupLayout = null;
     this.computePipeline = null;
     this.initialized = false;

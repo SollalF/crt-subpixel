@@ -3,16 +3,34 @@
  */
 
 import type { TgpuRoot } from "typegpu";
+import type { processImage } from "../pipeline/process.js";
+
+type ProcessImageTexture = Awaited<ReturnType<typeof processImage>>["texture"];
 
 /**
- * Read a GPUTexture back to ImageData
+ * Extract underlying GPUTexture from TypeGPU texture wrapper
+ */
+function getGPUTexture(texture: ProcessImageTexture): GPUTexture {
+  // TypeGPU textures wrap GPUTexture - access the underlying texture
+  return (texture as unknown as { texture: GPUTexture }).texture;
+}
+
+/**
+ * Read a texture back to ImageData
+ * Accepts both GPUTexture and TypeGPU texture wrappers
  */
 export async function readTextureToImageData(
   root: TgpuRoot,
-  texture: GPUTexture,
+  texture: GPUTexture | ProcessImageTexture,
   width: number,
   height: number,
 ): Promise<ImageData> {
+  // Extract underlying GPUTexture if it's a TypeGPU texture
+  const gpuTexture =
+    "texture" in texture &&
+    typeof (texture as unknown as { texture?: unknown }).texture === "object"
+      ? getGPUTexture(texture as ProcessImageTexture)
+      : (texture as GPUTexture);
   // Validate dimensions
   if (width <= 0 || height <= 0) {
     throw new Error(
@@ -35,7 +53,7 @@ export async function readTextureToImageData(
   // Copy texture to buffer
   const encoder = root.device.createCommandEncoder();
   encoder.copyTextureToBuffer(
-    { texture },
+    { texture: gpuTexture },
     {
       buffer,
       bytesPerRow: bytesPerRow,
@@ -80,11 +98,12 @@ export async function readTextureToImageData(
 }
 
 /**
- * Read a GPUTexture back to Uint8ClampedArray
+ * Read a texture back to Uint8ClampedArray
+ * Accepts both GPUTexture and TypeGPU texture wrappers
  */
 export async function readTextureToUint8Array(
   root: TgpuRoot,
-  texture: GPUTexture,
+  texture: GPUTexture | ProcessImageTexture,
   width: number,
   height: number,
 ): Promise<Uint8ClampedArray> {
