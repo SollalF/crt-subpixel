@@ -43,13 +43,8 @@ export async function renderTextureToCanvas(
   canvas.width = result.width;
   canvas.height = result.height;
 
-  // Create TypeGPU bind group layout for blit shader
-  const blitLayout = tgpu
-    .bindGroupLayout({
-      inputTexture: { texture: d.texture2d(d.f32) },
-      inputSampler: { sampler: "filtering" },
-    })
-    .$idx(0);
+  // Create texture view for direct sampling (simpler than bind groups for blit)
+  const renderView = result.texture.createView(d.texture2d(d.f32));
 
   // Create TypeGPU sampler
   const sampler = root["~unstable"].createSampler({
@@ -58,26 +53,22 @@ export async function renderTextureToCanvas(
   });
 
   // Create TypeGPU fragment function for blitting
-  const blitFragment = tgpu["~unstable"].fragmentFn({
+  // Direct texture view access (simpler pattern from WebGPU samples)
+  const renderFragment = tgpu["~unstable"].fragmentFn({
     in: { uv: d.vec2f },
     out: d.vec4f,
   })((input) => {
-    return std.textureSample(blitLayout.$.inputTexture, sampler.$, input.uv);
+    return std.textureSample(renderView.$, sampler.$, input.uv);
   });
 
   // Create TypeGPU render pipeline
   const renderPipeline = root["~unstable"]
     .withVertex(fullScreenTriangle, {})
-    .withFragment(blitFragment, { format: canvasFormat })
+    .withFragment(renderFragment, { format: canvasFormat })
     .createPipeline();
 
-  // Create TypeGPU bind group (textures work directly!)
-  const blitBindGroup = root.createBindGroup(blitLayout, {
-    inputTexture: result.texture,
-    inputSampler: sampler,
-  });
-
   // Render to canvas using TypeGPU's render pass API
+  // No bind group needed when using direct texture views
   renderPipeline
     .withColorAttachment({
       view: context.getCurrentTexture().createView(),
@@ -85,6 +76,5 @@ export async function renderTextureToCanvas(
       clearValue: { r: 0, g: 0, b: 0, a: 1 },
       storeOp: "store",
     })
-    .with(blitBindGroup)
     .draw(3);
 }
