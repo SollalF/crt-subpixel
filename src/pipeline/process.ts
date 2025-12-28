@@ -33,28 +33,13 @@ export async function processImage(
     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
   });
 
-  // Convert ImageBitmap to ImageData and upload to texture
-  const canvas = new OffscreenCanvas(inputWidth, inputHeight);
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    throw new Error("Failed to acquire 2D context");
-  }
-  ctx.drawImage(inputImage, 0, 0);
-  const imageData = ctx.getImageData(0, 0, inputWidth, inputHeight);
-
-  // Write image data directly to the texture
-  root.device.queue.writeTexture(
+  // Copy ImageBitmap directly to texture (no ImageData conversion needed!)
+  root.device.queue.copyExternalImageToTexture(
+    { source: inputImage },
     { texture: inputTexture },
-    imageData.data,
-    { bytesPerRow: inputWidth * 4, rowsPerImage: inputHeight },
     { width: inputWidth, height: inputHeight },
   );
   await root.device.queue.onSubmittedWorkDone();
-
-  // Debug: Log first pixel from the ImageData we just created
-  console.log(
-    `Input texture first pixel RGBA: ${imageData.data[0]}, ${imageData.data[1]}, ${imageData.data[2]}, ${imageData.data[3]}`,
-  );
 
   // Calculate output dimensions (3x expansion)
   const outputWidth = inputWidth * 3;
