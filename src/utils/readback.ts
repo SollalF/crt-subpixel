@@ -8,29 +8,27 @@ import type { processImage } from "../pipeline/process.js";
 type ProcessImageTexture = Awaited<ReturnType<typeof processImage>>["texture"];
 
 /**
- * Extract underlying GPUTexture from TypeGPU texture wrapper
+ * Extract underlying GPU texture from TypeGPU texture wrapper
+ * Internal implementation detail for readback functionality
  */
 function getGPUTexture(texture: ProcessImageTexture): GPUTexture {
-  // TypeGPU textures wrap GPUTexture - access the underlying texture
+  // TypeGPU textures wrap the underlying GPU texture - access it for buffer operations
   return (texture as unknown as { texture: GPUTexture }).texture;
 }
 
 /**
  * Read a texture back to ImageData
- * Accepts both GPUTexture and TypeGPU texture wrappers
+ * Accepts TypeGPU texture wrappers
  */
 export async function readTextureToImageData(
   root: TgpuRoot,
-  texture: GPUTexture | ProcessImageTexture,
+  texture: ProcessImageTexture,
   width: number,
   height: number,
 ): Promise<ImageData> {
-  // Extract underlying GPUTexture if it's a TypeGPU texture
-  const gpuTexture =
-    "texture" in texture &&
-    typeof (texture as unknown as { texture?: unknown }).texture === "object"
-      ? getGPUTexture(texture as ProcessImageTexture)
-      : (texture as GPUTexture);
+  // Extract underlying GPU texture from TypeGPU texture wrapper for buffer operations
+  const gpuTexture = getGPUTexture(texture);
+
   // Validate dimensions
   if (width <= 0 || height <= 0) {
     throw new Error(
@@ -40,17 +38,18 @@ export async function readTextureToImageData(
 
   // Create a buffer to hold the texture data
   const bytesPerPixel = 4; // RGBA8
-  // WebGPU requires bytesPerRow to be a multiple of 256 bytes for optimal performance
+  // GPU requires bytesPerRow to be a multiple of 256 bytes for optimal performance
   // We'll align it to 256 bytes
   const bytesPerRow = Math.ceil((width * bytesPerPixel) / 256) * 256;
   const bufferSize = bytesPerRow * height;
 
+  // Access device through TypeGPU root (minimal GPU access required for readback)
   const buffer = root.device.createBuffer({
     size: bufferSize,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    usage: 0x08 | 0x01, // COPY_DST | MAP_READ (using numeric values to avoid direct type imports)
   });
 
-  // Copy texture to buffer
+  // Copy texture to buffer using device command encoder
   const encoder = root.device.createCommandEncoder();
   encoder.copyTextureToBuffer(
     { texture: gpuTexture },
@@ -68,7 +67,7 @@ export async function readTextureToImageData(
   await root.device.queue.onSubmittedWorkDone();
 
   // Map buffer and read data
-  await buffer.mapAsync(GPUMapMode.READ);
+  await buffer.mapAsync(1); // READ mode (using numeric value to avoid direct type imports)
   const arrayBuffer = buffer.getMappedRange();
 
   // Extract only the actual pixel data (skip padding from alignment)
@@ -99,11 +98,11 @@ export async function readTextureToImageData(
 
 /**
  * Read a texture back to Uint8ClampedArray
- * Accepts both GPUTexture and TypeGPU texture wrappers
+ * Accepts TypeGPU texture wrappers
  */
 export async function readTextureToUint8Array(
   root: TgpuRoot,
-  texture: GPUTexture | ProcessImageTexture,
+  texture: ProcessImageTexture,
   width: number,
   height: number,
 ): Promise<Uint8ClampedArray> {

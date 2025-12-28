@@ -13,11 +13,4 @@ export interface ProcessResult {
   height: number;
 }
 
-export interface AdapterOptions {
-  /** Optional power preference for adapter selection */
-  powerPreference?: GPUPowerPreference;
-  /** Optional force fallback adapter */
-  forceFallbackAdapter?: boolean;
-}
-
 export type ImageInput = ImageBitmap;

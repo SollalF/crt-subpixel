@@ -47,11 +47,10 @@ export class CrtSubpixelProcessor {
   private initialized = false;
 
   /**
-   * Initialize WebGPU device and compile shaders
+   * Initialize GPU device and compile shaders
    * Must be called before processing any images
    *
-   * @param options Optional adapter configuration
-   * @throws Error if WebGPU is not supported or initialization fails
+   * @throws Error if GPU is not supported or initialization fails
    */
   async init(): Promise<void> {
     if (this.initialized) {
@@ -59,20 +58,15 @@ export class CrtSubpixelProcessor {
       return;
     }
 
-    // Check browser support
-    if (!navigator.gpu) {
-      throw new Error(
-        "WebGPU is not supported in this browser. Requires Chrome/Edge with WebGPU enabled.",
-      );
-    }
-
+    // TypeGPU handles WebGPU initialization and error checking
     this.root = await tgpu.init();
 
+    // Handle device loss through TypeGPU's device access
     this.root.device.lost.then((info) => {
-      console.error(`WebGPU device was lost: ${info.message}`);
+      console.error(`GPU device was lost: ${info.message}`);
     });
 
-    console.log("WebGPU device initialized");
+    console.log("GPU device initialized");
 
     // Create compute pipeline using TypeGPU
     // Use the '~unstable' API which is properly typed and includes withCompute
@@ -148,7 +142,7 @@ export class CrtSubpixelProcessor {
   }
 
   /**
-   * Render a processed texture directly to a WebGPU canvas
+   * Render a processed texture directly to a canvas
    * This avoids the need for CPU readback and is much faster
    *
    * @param canvas HTMLCanvasElement with WebGPU context
@@ -163,7 +157,7 @@ export class CrtSubpixelProcessor {
       throw new Error("Processor not initialized");
     }
 
-    // Get or configure WebGPU context
+    // Get or configure canvas context (minimal WebGPU access required for canvas)
     const context = canvas.getContext("webgpu");
     if (!context) {
       throw new Error(
@@ -171,8 +165,9 @@ export class CrtSubpixelProcessor {
       );
     }
 
-    // Configure canvas to use the same device
-    const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
+    // Configure canvas to use the same device through TypeGPU root
+    // Use default format (bgra8unorm is preferred on most platforms)
+    const canvasFormat = "bgra8unorm";
     context.configure({
       device: this.root!.device,
       format: canvasFormat,
@@ -235,7 +230,7 @@ export class CrtSubpixelProcessor {
    * Call this when done with the processor to free GPU memory
    */
   destroy(): void {
-    // Note: GPUTexture objects returned from process() should be destroyed
+    // Note: Texture objects returned from process() should be destroyed
     // by the caller when no longer needed
     this.root = null;
     this.bindGroupLayout = null;
@@ -245,4 +240,4 @@ export class CrtSubpixelProcessor {
 }
 
 // Re-export types
-export type { ProcessResult, AdapterOptions, ImageInput } from "./types.js";
+export type { ProcessResult, ImageInput } from "./types.js";

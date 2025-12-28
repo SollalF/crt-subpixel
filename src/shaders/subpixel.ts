@@ -34,7 +34,7 @@ export const subpixelComputeFn = tgpu["~unstable"].computeFn({
   // Get texture dimensions and invocation coordinates
   const outputSize = std.textureDimensions(
     subpixelBindGroupLayout.$.outputTexture,
-  ) as d.v2u;
+  );
   const outputX = input.global_invocation_id.x;
   const outputY = input.global_invocation_id.y;
 
@@ -56,7 +56,7 @@ export const subpixelComputeFn = tgpu["~unstable"].computeFn({
   // textureLoad uses integer coordinates, not UV coordinates
   const inputSize = std.textureDimensions(
     subpixelBindGroupLayout.$.inputTexture,
-  ) as d.v2u;
+  );
 
   // Bounds check for input coordinates (convert to u32 for comparison)
   if (d.u32(inputX) >= inputSize.x || d.u32(inputY) >= inputSize.y) {
@@ -67,7 +67,7 @@ export const subpixelComputeFn = tgpu["~unstable"].computeFn({
     subpixelBindGroupLayout.$.inputTexture,
     d.vec2i(inputX, inputY),
     0, // mip level
-  ) as d.v4f;
+  );
 
   // Create the subpixel pattern: vertical RGB stripes
   // blockX = 0 -> Red channel, blockX = 1 -> Green channel, blockX = 2 -> Blue channel
