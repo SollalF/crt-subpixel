@@ -12,11 +12,9 @@ import {
   readTextureToImageData,
   readTextureToUint8Array,
 } from "./utils/readback.js";
+import { renderTextureToCanvas } from "./utils/render.js";
 import type { ProcessResult } from "./types.js";
 import tgpu, { type TgpuRoot, type TgpuComputePipeline } from "typegpu";
-import * as d from "typegpu/data";
-import * as std from "typegpu/std";
-import { fullScreenTriangle } from "typegpu/common";
 
 // Import compute function and bind group layout
 import { subpixelComputeFn } from "./shaders/subpixel.js";
@@ -148,72 +146,7 @@ export class CrtSubpixelProcessor {
       throw new Error("Processor not initialized");
     }
 
-    // Get or configure canvas context (minimal WebGPU access required for canvas)
-    const context = canvas.getContext("webgpu");
-    if (!context) {
-      throw new Error(
-        "Failed to get WebGPU context from canvas. Make sure the canvas supports WebGPU.",
-      );
-    }
-
-    // Configure canvas to use the same device through TypeGPU root
-    // Use default format (bgra8unorm is preferred on most platforms)
-    const canvasFormat = "bgra8unorm";
-    context.configure({
-      device: this.root!.device,
-      format: canvasFormat,
-    });
-
-    // Set canvas size to match texture
-    canvas.width = result.width;
-    canvas.height = result.height;
-
-    // Create TypeGPU bind group layout for blit shader
-    const blitLayout = tgpu
-      .bindGroupLayout({
-        inputTexture: { texture: d.texture2d(d.f32) },
-        inputSampler: { sampler: "filtering" },
-      })
-      .$idx(0);
-
-    // Create TypeGPU sampler
-    const sampler = this.root!["~unstable"].createSampler({
-      magFilter: "linear",
-      minFilter: "linear",
-    });
-
-    // Create TypeGPU fragment function for blitting
-    const blitFragment = tgpu["~unstable"].fragmentFn({
-      in: { uv: d.vec2f },
-      out: d.vec4f,
-    })((input) => {
-      return std.textureSample(blitLayout.$.inputTexture, sampler.$, input.uv);
-    });
-
-    // Create TypeGPU render pipeline
-    const renderPipeline = this.root!["~unstable"].withVertex(
-      fullScreenTriangle,
-      {},
-    )
-      .withFragment(blitFragment, { format: canvasFormat })
-      .createPipeline();
-
-    // Create TypeGPU bind group (textures work directly!)
-    const blitBindGroup = this.root!.createBindGroup(blitLayout, {
-      inputTexture: result.texture,
-      inputSampler: sampler,
-    });
-
-    // Render to canvas using TypeGPU's render pass API
-    renderPipeline
-      .withColorAttachment({
-        view: context.getCurrentTexture().createView(),
-        loadOp: "clear",
-        clearValue: { r: 0, g: 0, b: 0, a: 1 },
-        storeOp: "store",
-      })
-      .with(blitBindGroup)
-      .draw(3);
+    return renderTextureToCanvas(this.root!, canvas, result);
   }
 
   /**
