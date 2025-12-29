@@ -48,7 +48,8 @@
       }
 
       select,
-      input[type="file"] {
+      input[type="file"],
+      button {
         padding: 8px 12px;
         background: #2a2a2a;
         border: 1px solid #444;
@@ -59,14 +60,22 @@
       }
 
       select:hover,
-      input[type="file"]:hover {
+      input[type="file"]:hover,
+      button:hover:not(:disabled) {
         border-color: #666;
+        background: #333;
       }
 
       select:focus,
-      input[type="file"]:focus {
+      input[type="file"]:focus,
+      button:focus:not(:disabled) {
         outline: none;
         border-color: #888;
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
       }
 
       .status {
@@ -113,6 +122,11 @@
         <div class="control-group">
           <label for="file-input">Or select from file system:</label>
           <input type="file" id="file-input" accept="image/*" />
+        </div>
+
+        <div class="control-group">
+          <label for="download-button">&nbsp;</label>
+          <button id="download-button" disabled>Download Image</button>
         </div>
       </div>
 

@@ -35,6 +35,9 @@ const testImageSelect = document.getElementById(
 const fileInput = document.getElementById("file-input") as HTMLInputElement;
 const statusDiv = document.getElementById("status") as HTMLDivElement;
 const canvas = document.getElementById("output-canvas") as HTMLCanvasElement;
+const downloadButton = document.getElementById(
+  "download-button",
+) as HTMLButtonElement;
 
 // Populate test images dropdown
 TEST_IMAGES.forEach((imageName) => {
@@ -95,17 +98,25 @@ async function processAndRender(imageBitmap: ImageBitmap) {
       currentResult = null;
     }
 
+    // Disable download button while processing
+    downloadButton.disabled = true;
+
     // Process the image
     currentResult = await processor.process(imageBitmap);
 
     // Render to canvas
     await processor.renderToCanvas(canvas, currentResult);
 
+    // Enable download button
+    downloadButton.disabled = false;
+
     setStatus(
       `Image processed successfully. Output size: ${currentResult.width}x${currentResult.height}`,
       "success",
     );
   } catch (error) {
+    // Keep download button disabled on error
+    downloadButton.disabled = true;
     setStatus(
       `Processing failed: ${error instanceof Error ? error.message : String(error)}`,
       "error",
@@ -156,6 +167,62 @@ fileInput.addEventListener("change", async (e) => {
     );
   }
 });
+
+// Download canvas image
+async function downloadImage() {
+  if (!currentResult || !processor) {
+    setStatus("No image to download", "error");
+    return;
+  }
+
+  try {
+    setStatus("Reading image data from GPU...", "info");
+
+    // Read texture back from GPU to ImageData
+    const imageData = await processor.readbackImageData(currentResult);
+
+    // Create a temporary 2D canvas to convert ImageData to blob
+    const tempCanvas = document.createElement("canvas");
+    tempCanvas.width = imageData.width;
+    tempCanvas.height = imageData.height;
+    const ctx = tempCanvas.getContext("2d");
+    if (!ctx) {
+      setStatus("Failed to create 2D canvas context", "error");
+      return;
+    }
+
+    // Draw ImageData to 2D canvas
+    ctx.putImageData(imageData, 0, 0);
+
+    // Convert canvas to blob and create download link
+    tempCanvas.toBlob((blob) => {
+      if (!blob) {
+        setStatus("Failed to create image blob", "error");
+        return;
+      }
+
+      // Create download link
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `crt-subpixel-${Date.now()}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setStatus("Image downloaded!", "success");
+    }, "image/png");
+  } catch (error) {
+    setStatus(
+      `Failed to download image: ${error instanceof Error ? error.message : String(error)}`,
+      "error",
+    );
+  }
+}
+
+// Handle download button click
+downloadButton.addEventListener("click", downloadImage);
 
 // Initialize on page load
 setStatus("Ready. Select an image to process.", "info");

@@ -2,33 +2,21 @@
  * Utilities for reading back GPU textures to CPU memory
  */
 
-import type { TgpuRoot } from "typegpu";
-import type { processImage } from "../pipeline/process.js";
-
-type ProcessImageTexture = Awaited<ReturnType<typeof processImage>>["texture"];
-
-/**
- * Extract underlying GPU texture from TypeGPU texture wrapper
- * Internal implementation detail for readback functionality
- */
-function getGPUTexture(texture: ProcessImageTexture): GPUTexture {
-  // TypeGPU textures wrap the underlying GPU texture - access it for buffer operations
-  return (texture as unknown as { texture: GPUTexture }).texture;
-}
+import type { TgpuRoot, TgpuTexture } from "typegpu";
 
 /**
  * Read a texture back to ImageData
  * Accepts TypeGPU texture wrappers
+ *
+ * Note: WebGPU's copyTextureToBuffer API requires access to the underlying GPUTexture.
+ * TypeGPU doesn't provide a high-level readback API, so we must access the wrapped texture.
  */
 export async function readTextureToImageData(
   root: TgpuRoot,
-  texture: ProcessImageTexture,
+  texture: TgpuTexture,
   width: number,
   height: number,
 ): Promise<ImageData> {
-  // Extract underlying GPU texture from TypeGPU texture wrapper for buffer operations
-  const gpuTexture = getGPUTexture(texture);
-
   // Validate dimensions
   if (width <= 0 || height <= 0) {
     throw new Error(
@@ -36,62 +24,73 @@ export async function readTextureToImageData(
     );
   }
 
-  // Create a buffer to hold the texture data
-  const bytesPerPixel = 4; // RGBA8
-  // GPU requires bytesPerRow to be a multiple of 256 bytes for optimal performance
-  // We'll align it to 256 bytes
-  const bytesPerRow = Math.ceil((width * bytesPerPixel) / 256) * 256;
-  const bufferSize = bytesPerRow * height;
+  // Create buffer with copy-dst usage to receive texture data
+  // Calculate bytes per row (4 bytes per pixel for rgba8unorm)
+  // WebGPU requires bytesPerRow to be 256-byte aligned
+  const bytesPerPixel = 4;
+  const bytesPerRow = width * bytesPerPixel;
+  const alignedBytesPerRow = Math.ceil(bytesPerRow / 256) * 256;
+  const bufferSize = alignedBytesPerRow * height;
 
-  // Access device through TypeGPU root (minimal GPU access required for readback)
-  const buffer = root.device.createBuffer({
+  // Create WebGPU buffer directly for readback (need direct access for copyTextureToBuffer)
+  const gpuBuffer = root.device.createBuffer({
     size: bufferSize,
-    usage: 0x08 | 0x01, // COPY_DST | MAP_READ (using numeric values to avoid direct type imports)
+    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
   });
 
-  // Copy texture to buffer using device command encoder
+  // Use WebGPU command encoder to copy texture to buffer
+  // Access underlying GPUTexture from TypeGPU wrapper
+  // TypeGPU may expose underlying objects via various properties
   const encoder = root.device.createCommandEncoder();
+  const gpuTexture = root.unwrap(texture);
+
   encoder.copyTextureToBuffer(
-    { texture: gpuTexture },
     {
-      buffer,
-      bytesPerRow: bytesPerRow,
+      texture: gpuTexture,
+    },
+    {
+      buffer: gpuBuffer,
+      bytesPerRow: alignedBytesPerRow,
       rowsPerImage: height,
     },
-    { width, height },
+    {
+      width,
+      height,
+      depthOrArrayLayers: 1,
+    },
   );
-
   root.device.queue.submit([encoder.finish()]);
 
   // Wait for GPU to finish copying
   await root.device.queue.onSubmittedWorkDone();
 
-  // Map buffer and read data
-  await buffer.mapAsync(1); // READ mode (using numeric value to avoid direct type imports)
-  const arrayBuffer = buffer.getMappedRange();
+  // Map buffer for reading
+  await gpuBuffer.mapAsync(GPUMapMode.READ);
+  const mappedRange = gpuBuffer.getMappedRange();
 
-  // Extract only the actual pixel data (skip padding from alignment)
-  const actualDataSize = width * height * bytesPerPixel;
-  const data = new Uint8ClampedArray(actualDataSize);
+  // Copy the entire mapped range to a new buffer before unmapping
+  // This ensures we have an independent copy that won't be affected by unmapping
+  const rawDataCopy = new Uint8ClampedArray(mappedRange);
 
-  // Copy row by row to skip padding
-  const sourceView = new Uint8Array(arrayBuffer);
+  // Unmap buffer immediately after copying
+  gpuBuffer.unmap();
+
+  // Extract actual pixel data, skipping padding at end of each row
+  // The buffer has aligned rows, but we only need the actual pixel data
+  const data = new Uint8ClampedArray(width * height * bytesPerPixel);
   for (let y = 0; y < height; y++) {
-    const sourceOffset = y * bytesPerRow;
-    const destOffset = y * width * bytesPerPixel;
-    data.set(
-      sourceView.subarray(sourceOffset, sourceOffset + width * bytesPerPixel),
-      destOffset,
-    );
+    const srcOffset = y * alignedBytesPerRow;
+    const dstOffset = y * bytesPerRow;
+    // Copy row data (slice creates a copy)
+    const rowData = rawDataCopy.slice(srcOffset, srcOffset + bytesPerRow);
+    data.set(rowData, dstOffset);
   }
-
-  buffer.unmap();
 
   // Create ImageData
   const imageData = new ImageData(data, width, height);
 
   // Clean up buffer
-  buffer.destroy();
+  gpuBuffer.destroy();
 
   return imageData;
 }
@@ -102,7 +101,7 @@ export async function readTextureToImageData(
  */
 export async function readTextureToUint8Array(
   root: TgpuRoot,
-  texture: ProcessImageTexture,
+  texture: TgpuTexture,
   width: number,
   height: number,
 ): Promise<Uint8ClampedArray> {
