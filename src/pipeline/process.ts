@@ -1,19 +1,17 @@
 /**
- * Image processing pipeline implementation
+ * Image processing pipeline implementation using fragment shader
  */
-import {
-  WORKGROUP_SIZE,
-  subpixelBindGroupLayout,
-} from "../shaders/subpixel.js";
-import type { TgpuRoot, TgpuComputePipeline } from "typegpu";
+import type { TgpuRoot, TgpuRenderPipeline } from "typegpu";
+import * as d from "typegpu/data";
+import { imageBindGroupLayout } from "../shaders/subpixel-fragment.js";
 
 /**
- * Process an image through the subpixel pipeline
- * Uses "rgba8unorm" format (hardcoded to match shader requirements)
+ * Process an image through the subpixel pipeline using fragment shader
+ * Renders directly to output texture using the same fragment shader approach as video
  */
 export async function processImage(
   root: TgpuRoot,
-  computePipeline: TgpuComputePipeline,
+  renderPipeline: TgpuRenderPipeline,
   inputImage: ImageBitmap,
 ) {
   const inputWidth = inputImage.width;
@@ -23,7 +21,7 @@ export async function processImage(
 
   // Create sampled texture using TypeGPU
   // Format is hardcoded to "rgba8unorm" to match shader requirements
-  // Needs render usage for write() to copy ImageBitmap data (render includes copy destination)
+  // Needs render usage for write() to copy ImageBitmap data
   const inputTexture = root["~unstable"]
     .createTexture({
       size: [inputWidth, inputHeight],
@@ -39,31 +37,35 @@ export async function processImage(
   const outputWidth = inputWidth * 3;
   const outputHeight = inputHeight * 3;
 
-  // Create output texture with storage binding
+  // Create output texture for render target
   // Format is hardcoded to "rgba8unorm" to match shader requirements
+  // Needs both render (for writing) and sampled (for reading back to canvas)
   const outputTexture = root["~unstable"]
     .createTexture({
       size: [outputWidth, outputHeight],
       format: "rgba8unorm",
     })
-    .$usage("storage", "sampled"); // For render passes (e.g., canvas display)
+    .$usage("render")
+    .$usage("sampled"); // For render passes (e.g., canvas display)
 
-  // Create TypeGPU bind group
-  // TypeGPU bind groups accept texture objects directly (not views)
-  // Using the layout directly preserves type information for proper type inference
-  const bindGroup = root.createBindGroup(subpixelBindGroupLayout, {
+  // Create texture view for rendering
+  const outputView = outputTexture.createView(d.texture2d(d.f32));
+
+  // Create bind group with input texture
+  const bindGroup = root.createBindGroup(imageBindGroupLayout, {
     inputTexture: inputTexture,
-    outputTexture: outputTexture,
   });
 
-  // Dispatch compute shader using TypeGPU pipeline API
-  // Workgroup size is 8x8, so we need to dispatch enough workgroups
-  const [workgroupSizeX, workgroupSizeY] = WORKGROUP_SIZE;
-  const dispatchX = Math.ceil(outputWidth / workgroupSizeX);
-  const dispatchY = Math.ceil(outputHeight / workgroupSizeY);
-
-  // Dispatch compute shader - TypeGPU handles command encoding and submission
-  computePipeline.with(bindGroup).dispatchWorkgroups(dispatchX, dispatchY);
+  // Render to output texture using fragment shader
+  renderPipeline
+    .with(bindGroup)
+    .withColorAttachment({
+      view: outputView,
+      loadOp: "clear",
+      clearValue: { r: 0, g: 0, b: 0, a: 1 },
+      storeOp: "store",
+    })
+    .draw(3);
 
   // Wait for GPU to finish processing before returning
   await root.device.queue.onSubmittedWorkDone();

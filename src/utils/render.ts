@@ -33,7 +33,7 @@ export async function renderTextureToCanvas(
 
   // Configure canvas to use the same device through TypeGPU root
   // Use default format (bgra8unorm is preferred on most platforms)
-  const canvasFormat = "bgra8unorm";
+  const canvasFormat = navigator.gpu.getPreferredCanvasFormat();
   context.configure({
     device: root.device,
     format: canvasFormat,

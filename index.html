@@ -78,6 +78,11 @@
         cursor: not-allowed;
       }
 
+      button.active {
+        background: #2a4a2a;
+        border-color: #4a8a4a;
+      }
+
       .status {
         margin-top: 10px;
         padding: 10px;
@@ -105,6 +110,14 @@
         background: #000;
         margin-top: 20px;
       }
+
+      .image-controls {
+        display: contents;
+      }
+
+      .image-controls.hidden {
+        display: none;
+      }
     </style>
   </head>
   <body>
@@ -113,24 +126,31 @@
 
       <div class="controls">
         <div class="control-group">
-          <label for="test-image-select">Select from test images:</label>
-          <select id="test-image-select">
-            <option value="">-- Choose a test image --</option>
-          </select>
+          <label for="camera-button">Camera Input:</label>
+          <button id="camera-button">Start Camera</button>
         </div>
 
-        <div class="control-group">
-          <label for="file-input">Or select from file system:</label>
-          <input type="file" id="file-input" accept="image/*" />
-        </div>
+        <div class="image-controls" id="image-controls">
+          <div class="control-group">
+            <label for="test-image-select">Select from test images:</label>
+            <select id="test-image-select">
+              <option value="">-- Choose a test image --</option>
+            </select>
+          </div>
 
-        <div class="control-group">
-          <label for="download-button">&nbsp;</label>
-          <button id="download-button" disabled>Download Image</button>
+          <div class="control-group">
+            <label for="file-input">Or select from file system:</label>
+            <input type="file" id="file-input" accept="image/*" />
+          </div>
+
+          <div class="control-group">
+            <label for="download-button">&nbsp;</label>
+            <button id="download-button" disabled>Download Image</button>
+          </div>
         </div>
       </div>
 
-      <div id="status" class="status">Ready. Select an image to process.</div>
+      <div id="status" class="status">Ready. Select an image to process or start the camera.</div>
 
       <canvas id="output-canvas"></canvas>
     </div>
@@ -138,4 +158,3 @@
     <script type="module" src="/src/test-page.ts"></script>
   </body>
 </html>
-

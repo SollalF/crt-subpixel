@@ -25,8 +25,13 @@ const TEST_IMAGES = [
   "white-1x1.png",
 ];
 
+// Single unified processor for both images and camera
 let processor: CrtSubpixelProcessor | null = null;
 let currentResult: ProcessResult | null = null;
+
+// Mode tracking
+type Mode = "image" | "camera";
+let currentMode: Mode = "image";
 
 // Get DOM elements
 const testImageSelect = document.getElementById(
@@ -38,6 +43,12 @@ const canvas = document.getElementById("output-canvas") as HTMLCanvasElement;
 const downloadButton = document.getElementById(
   "download-button",
 ) as HTMLButtonElement;
+const cameraButton = document.getElementById(
+  "camera-button",
+) as HTMLButtonElement;
+const imageControls = document.getElementById(
+  "image-controls",
+) as HTMLDivElement;
 
 // Populate test images dropdown
 TEST_IMAGES.forEach((imageName) => {
@@ -56,6 +67,17 @@ function setStatus(
   statusDiv.className = `status ${type}`;
 }
 
+// Initialize processor if needed
+async function ensureProcessor(): Promise<CrtSubpixelProcessor> {
+  if (!processor) {
+    setStatus("Initializing processor...", "info");
+    processor = new CrtSubpixelProcessor();
+    await processor.init();
+    setStatus("Processor initialized successfully", "success");
+  }
+  return processor;
+}
+
 // Load image from URL
 async function loadImage(url: string): Promise<ImageBitmap> {
   const response = await fetch(url);
@@ -71,25 +93,69 @@ async function loadImageFromFile(file: File): Promise<ImageBitmap> {
   return createImageBitmap(file);
 }
 
+// Switch to image mode
+function switchToImageMode() {
+  if (currentMode === "image") return;
+
+  // Stop camera if running
+  if (processor?.isCameraRunning()) {
+    processor.stopCamera();
+  }
+
+  currentMode = "image";
+  cameraButton.textContent = "Start Camera";
+  cameraButton.classList.remove("active");
+  imageControls.classList.remove("hidden");
+  setStatus("Ready. Select an image to process.", "info");
+}
+
+// Switch to camera mode
+async function toggleCameraMode() {
+  // If camera is running, stop it
+  if (processor?.isCameraRunning()) {
+    switchToImageMode();
+    return;
+  }
+
+  // Clean up image processing result
+  if (currentResult) {
+    currentResult.texture.destroy();
+    currentResult = null;
+  }
+
+  currentMode = "camera";
+  imageControls.classList.add("hidden");
+  cameraButton.textContent = "Stop Camera";
+  cameraButton.classList.add("active");
+  downloadButton.disabled = true;
+
+  try {
+    const proc = await ensureProcessor();
+    setStatus("Starting camera...", "info");
+    await proc.startCamera(canvas);
+    setStatus(
+      "Camera running. CRT subpixel effect applied in real-time.",
+      "success",
+    );
+  } catch (error) {
+    setStatus(
+      `Failed to start camera: ${error instanceof Error ? error.message : String(error)}`,
+      "error",
+    );
+    switchToImageMode();
+  }
+}
+
 // Process and render image
 async function processAndRender(imageBitmap: ImageBitmap) {
-  if (!processor) {
-    setStatus("Initializing processor...", "info");
-    processor = new CrtSubpixelProcessor();
-    try {
-      await processor.init();
-      setStatus("Processor initialized successfully", "success");
-    } catch (error) {
-      setStatus(
-        `Failed to initialize processor: ${error instanceof Error ? error.message : String(error)}`,
-        "error",
-      );
-      processor = null;
-      return;
-    }
+  // Make sure we're in image mode (stops camera if running)
+  if (currentMode !== "image") {
+    switchToImageMode();
   }
 
   try {
+    const proc = await ensureProcessor();
+
     setStatus("Processing image...", "info");
 
     // Clean up previous result
@@ -102,10 +168,10 @@ async function processAndRender(imageBitmap: ImageBitmap) {
     downloadButton.disabled = true;
 
     // Process the image
-    currentResult = await processor.process(imageBitmap);
+    currentResult = await proc.process(imageBitmap);
 
     // Render to canvas
-    await processor.renderToCanvas(canvas, currentResult);
+    await proc.renderToCanvas(canvas, currentResult);
 
     // Enable download button
     downloadButton.disabled = false;
@@ -123,6 +189,9 @@ async function processAndRender(imageBitmap: ImageBitmap) {
     );
   }
 }
+
+// Handle camera button click
+cameraButton.addEventListener("click", toggleCameraMode);
 
 // Handle test image selection
 testImageSelect.addEventListener("change", async (e) => {
@@ -224,5 +293,12 @@ async function downloadImage() {
 // Handle download button click
 downloadButton.addEventListener("click", downloadImage);
 
+// Cleanup on page unload
+window.addEventListener("beforeunload", () => {
+  if (processor) {
+    processor.destroy();
+  }
+});
+
 // Initialize on page load
-setStatus("Ready. Select an image to process.", "info");
+setStatus("Ready. Select an image to process or start the camera.", "info");

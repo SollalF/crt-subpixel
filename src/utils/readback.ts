@@ -2,18 +2,19 @@
  * Utilities for reading back GPU textures to CPU memory
  */
 
-import type { TgpuRoot, TgpuTexture } from "typegpu";
+import type { TgpuRoot } from "typegpu";
 
 /**
  * Read a texture back to ImageData
- * Accepts TypeGPU texture wrappers
+ * Accepts TypeGPU texture wrappers (with any usage flags)
  *
  * Note: WebGPU's copyTextureToBuffer API requires access to the underlying GPUTexture.
  * TypeGPU doesn't provide a high-level readback API, so we must access the wrapped texture.
  */
 export async function readTextureToImageData(
   root: TgpuRoot,
-  texture: TgpuTexture,
+  // Type for any texture that can be unwrapped (accepts textures with any usage flags)
+  texture: Parameters<TgpuRoot["unwrap"]>[0],
   width: number,
   height: number,
 ): Promise<ImageData> {
@@ -68,9 +69,12 @@ export async function readTextureToImageData(
   await gpuBuffer.mapAsync(GPUMapMode.READ);
   const mappedRange = gpuBuffer.getMappedRange();
 
-  // Copy the entire mapped range to a new buffer before unmapping
+  // Copy the entire mapped range to a new ArrayBuffer before unmapping
   // This ensures we have an independent copy that won't be affected by unmapping
-  const rawDataCopy = new Uint8ClampedArray(mappedRange);
+  // Create a new ArrayBuffer and copy the data
+  const rawDataBuffer = new ArrayBuffer(mappedRange.byteLength);
+  const rawDataView = new Uint8Array(rawDataBuffer);
+  rawDataView.set(new Uint8Array(mappedRange));
 
   // Unmap buffer immediately after copying
   gpuBuffer.unmap();
@@ -81,8 +85,8 @@ export async function readTextureToImageData(
   for (let y = 0; y < height; y++) {
     const srcOffset = y * alignedBytesPerRow;
     const dstOffset = y * bytesPerRow;
-    // Copy row data (slice creates a copy)
-    const rowData = rawDataCopy.slice(srcOffset, srcOffset + bytesPerRow);
+    // Copy row data from the independent buffer
+    const rowData = rawDataView.slice(srcOffset, srcOffset + bytesPerRow);
     data.set(rowData, dstOffset);
   }
 
@@ -93,18 +97,4 @@ export async function readTextureToImageData(
   gpuBuffer.destroy();
 
   return imageData;
-}
-
-/**
- * Read a texture back to Uint8ClampedArray
- * Accepts TypeGPU texture wrappers
- */
-export async function readTextureToUint8Array(
-  root: TgpuRoot,
-  texture: TgpuTexture,
-  width: number,
-  height: number,
-): Promise<Uint8ClampedArray> {
-  const imageData = await readTextureToImageData(root, texture, width, height);
-  return imageData.data;
 }
