@@ -2,7 +2,7 @@
  * Utilities for reading back GPU textures to CPU memory
  */
 
-import type { TgpuRoot } from "typegpu";
+import type { TgpuRoot, TgpuTexture, TextureProps } from "typegpu";
 
 /**
  * Read a texture back to ImageData
@@ -11,10 +11,9 @@ import type { TgpuRoot } from "typegpu";
  * Note: WebGPU's copyTextureToBuffer API requires access to the underlying GPUTexture.
  * TypeGPU doesn't provide a high-level readback API, so we must access the wrapped texture.
  */
-export async function readTextureToImageData(
+export async function readTextureToImageData<T extends TextureProps>(
   root: TgpuRoot,
-  // Type for any texture that can be unwrapped (accepts textures with any usage flags)
-  texture: Parameters<TgpuRoot["unwrap"]>[0],
+  texture: TgpuTexture<T>,
   width: number,
   height: number,
 ): Promise<ImageData> {
