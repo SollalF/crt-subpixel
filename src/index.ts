@@ -85,6 +85,13 @@ export class CrtSubpixelProcessor {
   private cameraContext: GPUCanvasContext | null = null;
   private lastFrameSize: { width: number; height: number } | null = null;
 
+  // Pending export request (resolved after next frame render)
+  private pendingExport: {
+    resolve: (blob: Blob | null) => void;
+    type: string;
+    quality: number | undefined;
+  } | null = null;
+
   /**
    * Initialize GPU device and compile shaders
    * Must be called before processing any images or starting camera
@@ -322,6 +329,12 @@ export class CrtSubpixelProcessor {
     this.cameraContext = null;
     this.lastFrameSize = null;
 
+    // Resolve any pending export with null
+    if (this.pendingExport) {
+      this.pendingExport.resolve(null);
+      this.pendingExport = null;
+    }
+
     console.log("Camera stopped");
   }
 
@@ -330,6 +343,31 @@ export class CrtSubpixelProcessor {
    */
   isCameraRunning(): boolean {
     return this.cameraStream !== null;
+  }
+
+  /**
+   * Export the current camera canvas frame as an image blob
+   *
+   * Captures the frame immediately after the next render to ensure
+   * the canvas has valid content (WebGPU canvases are cleared after present).
+   *
+   * @param type Image MIME type (e.g., 'image/png', 'image/jpeg')
+   * @param quality For lossy formats like JPEG, quality from 0 to 1
+   * @returns Promise resolving to the image Blob, or null if camera is not running
+   */
+  async exportCameraFrame(
+    type: string = "image/png",
+    quality?: number,
+  ): Promise<Blob | null> {
+    if (!this.cameraCanvas || !this.isCameraRunning()) {
+      console.warn("Camera is not running, cannot export frame");
+      return null;
+    }
+
+    // Set up pending export - will be resolved after next frame render
+    return new Promise((resolve) => {
+      this.pendingExport = { resolve, type, quality };
+    });
   }
 
   /**
@@ -447,6 +485,14 @@ export class CrtSubpixelProcessor {
         storeOp: "store",
       })
       .draw(3);
+
+    // Handle pending export request (capture immediately after render)
+    if (this.pendingExport && this.cameraCanvas) {
+      const { resolve, type, quality } = this.pendingExport;
+      this.pendingExport = null;
+
+      this.cameraCanvas.toBlob((blob) => resolve(blob), type, quality);
+    }
 
     // Schedule next frame
     this.videoFrameCallbackId = video.requestVideoFrameCallback(

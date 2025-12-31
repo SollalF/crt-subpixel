@@ -59,6 +59,12 @@ const densitySlider = document.getElementById(
 const densityValue = document.getElementById(
   "density-value",
 ) as HTMLSpanElement;
+const exportButton = document.getElementById(
+  "export-button",
+) as HTMLButtonElement;
+const exportControl = document.getElementById(
+  "export-control",
+) as HTMLDivElement;
 
 // Populate test images dropdown
 TEST_IMAGES.forEach((imageName) => {
@@ -116,6 +122,7 @@ function switchToImageMode() {
   cameraButton.textContent = "Start Camera";
   cameraButton.classList.remove("active");
   imageControls.classList.remove("hidden");
+  exportControl.style.display = "none";
   setStatus("Ready. Select an image to process.", "info");
 }
 
@@ -138,6 +145,7 @@ async function toggleCameraMode() {
   cameraButton.textContent = "Stop Camera";
   cameraButton.classList.add("active");
   downloadButton.disabled = true;
+  exportControl.style.display = "flex";
 
   try {
     const proc = await ensureProcessor();
@@ -207,6 +215,41 @@ async function processAndRender(imageBitmap: ImageBitmap, saveImage = true) {
 
 // Handle camera button click
 cameraButton.addEventListener("click", toggleCameraMode);
+
+// Handle export button click
+exportButton.addEventListener("click", async () => {
+  if (!processor?.isCameraRunning()) {
+    setStatus("Camera is not running", "error");
+    return;
+  }
+
+  try {
+    setStatus("Exporting frame...", "info");
+    const blob = await processor.exportCameraFrame("image/png");
+
+    if (!blob) {
+      setStatus("Failed to export frame", "error");
+      return;
+    }
+
+    // Create download link
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `crt-frame-${Date.now()}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    setStatus("Frame exported!", "success");
+  } catch (error) {
+    setStatus(
+      `Failed to export frame: ${error instanceof Error ? error.message : String(error)}`,
+      "error",
+    );
+  }
+});
 
 // Handle orientation change
 orientationSelect.addEventListener("change", async (e) => {
