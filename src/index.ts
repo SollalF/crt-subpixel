@@ -68,6 +68,7 @@ export class CrtSubpixelProcessor {
   // Single unified pipeline using external textures for both images and camera
   // Images are converted to VideoFrame to use the same external texture path
   private pipeline: TgpuRenderPipeline | null = null;
+  private presentationFormat: GPUTextureFormat | null = null;
 
   // Current canvas and context (shared between image and camera modes)
   private currentCanvas: HTMLCanvasElement | null = null;
@@ -136,7 +137,7 @@ export class CrtSubpixelProcessor {
 
     // Create unified pipeline (renders directly to canvas)
     // Uses external textures for both images (via VideoFrame) and camera
-    const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+    this.presentationFormat = navigator.gpu.getPreferredCanvasFormat();
     const fragmentFn = createSubpixelFragment(
       this.sampler,
       this.outputDimensionsBuffer,
@@ -146,7 +147,7 @@ export class CrtSubpixelProcessor {
     );
     this.pipeline = this.root["~unstable"]
       .withVertex(fullScreenTriangle, {})
-      .withFragment(fragmentFn, { format: presentationFormat })
+      .withFragment(fragmentFn, { format: this.presentationFormat })
       .createPipeline();
 
     console.log("Pipeline created successfully");
@@ -174,7 +175,8 @@ export class CrtSubpixelProcessor {
       !this.root ||
       !this.pipeline ||
       !this.outputDimensionsBuffer ||
-      !this.inputDimensionsBuffer
+      !this.inputDimensionsBuffer ||
+      !this.presentationFormat
     ) {
       throw new Error(
         "Processor not initialized. Call init() before rendering images.",
@@ -195,10 +197,9 @@ export class CrtSubpixelProcessor {
     this.currentCanvas = canvas;
     this.currentContext = context;
 
-    const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
     context.configure({
       device: this.root.device,
-      format: presentationFormat,
+      format: this.presentationFormat,
       alphaMode: "premultiplied",
     });
 
@@ -271,7 +272,12 @@ export class CrtSubpixelProcessor {
     canvas: HTMLCanvasElement,
     options?: CameraOptions,
   ): Promise<void> {
-    if (!this.initialized || !this.root || !this.pipeline) {
+    if (
+      !this.initialized ||
+      !this.root ||
+      !this.pipeline ||
+      !this.presentationFormat
+    ) {
       throw new Error("Processor not initialized. Call init() first.");
     }
 
@@ -287,10 +293,9 @@ export class CrtSubpixelProcessor {
     }
     this.currentContext = context;
 
-    const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
     context.configure({
       device: this.root.device,
-      format: presentationFormat,
+      format: this.presentationFormat,
       alphaMode: "premultiplied",
     });
 
@@ -348,8 +353,8 @@ export class CrtSubpixelProcessor {
    * Export the current canvas frame as an image blob
    *
    * Works in both image and camera modes:
-   * - In image mode: exports immediately (canvas already has content)
-   * - In camera mode: captures after the next render (WebGPU clears after present)
+   * - In image mode: re-renders the image to capture it (WebGPU clears canvas after present)
+   * - In camera mode: captures after the next render
    *
    * @param type Image MIME type (e.g., 'image/png', 'image/jpeg')
    * @param quality For lossy formats like JPEG, quality from 0 to 1
@@ -371,7 +376,85 @@ export class CrtSubpixelProcessor {
       });
     }
 
-    // In image mode, export immediately (canvas already has content)
+    // In image mode, re-render and capture
+    // WebGPU clears the canvas after present, so we need to re-render to capture
+    if (!this.currentImageBitmap) {
+      console.warn("No image to export");
+      return null;
+    }
+
+    return this.exportImage(type, quality);
+  }
+
+  /**
+   * Export the current image by re-running the render pipeline and capturing the result
+   * This is needed because WebGPU clears the canvas after each frame is presented
+   *
+   * @param type Image MIME type (e.g., 'image/png', 'image/jpeg')
+   * @param quality For lossy formats like JPEG, quality from 0 to 1
+   * @returns Promise resolving to the image Blob, or null if export fails
+   */
+  private async exportImage(
+    type: string = "image/png",
+    quality?: number,
+  ): Promise<Blob | null> {
+    if (
+      !this.initialized ||
+      !this.root ||
+      !this.pipeline ||
+      !this.outputDimensionsBuffer ||
+      !this.inputDimensionsBuffer ||
+      !this.presentationFormat ||
+      !this.currentCanvas ||
+      !this.currentContext ||
+      !this.currentImageBitmap
+    ) {
+      console.warn("Cannot export: processor not ready or no image loaded");
+      return null;
+    }
+
+    const input = this.currentImageBitmap;
+
+    // Update input dimensions uniform
+    this.inputDimensionsBuffer.write(d.vec2u(input.width, input.height));
+
+    // Calculate output dimensions (3x expansion adjusted for pixel density)
+    const logicalWidth = input.width / this.currentPixelDensity;
+    const logicalHeight = input.height / this.currentPixelDensity;
+    const outputWidth = Math.floor(logicalWidth * 3);
+    const outputHeight = Math.floor(logicalHeight * 3);
+
+    // Update output dimensions uniform
+    this.outputDimensionsBuffer.write(d.vec2u(outputWidth, outputHeight));
+
+    // Convert ImageBitmap to VideoFrame for use with external texture
+    const videoFrame = new VideoFrame(input, { timestamp: 0 });
+
+    // Create bind group with external texture from VideoFrame
+    const gpuExternalTexture = this.root.createBindGroup(bindGroupLayout, {
+      externalTexture: this.root.device.importExternalTexture({
+        source: videoFrame,
+      }),
+    });
+
+    // Render directly to canvas
+    this.pipeline
+      .with(gpuExternalTexture)
+      .withColorAttachment({
+        view: this.currentContext.getCurrentTexture().createView(),
+        loadOp: "clear",
+        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        storeOp: "store",
+      })
+      .draw(3);
+
+    // Wait for GPU to finish rendering
+    await this.root.device.queue.onSubmittedWorkDone();
+
+    // Clean up VideoFrame
+    videoFrame.close();
+
+    // Now capture the canvas content before it gets cleared
     return new Promise((resolve) => {
       this.currentCanvas!.toBlob((blob) => resolve(blob), type, quality);
     });
@@ -568,6 +651,7 @@ export class CrtSubpixelProcessor {
     this.orientationBuffer = null;
     this.pixelDensityBuffer = null;
     this.pipeline = null;
+    this.presentationFormat = null;
     this.currentCanvas = null;
     this.currentContext = null;
     this.initialized = false;
