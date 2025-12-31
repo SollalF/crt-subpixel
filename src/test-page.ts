@@ -1,4 +1,4 @@
-import { CrtSubpixelProcessor, type ProcessResult } from "./index.js";
+import { CrtSubpixelProcessor } from "./index.js";
 
 // Test images available in the test-images folder
 const TEST_IMAGES = [
@@ -27,7 +27,6 @@ const TEST_IMAGES = [
 
 // Single unified processor for both images and camera
 let processor: CrtSubpixelProcessor | null = null;
-let currentResult: ProcessResult | null = null;
 let currentImageBitmap: ImageBitmap | null = null;
 
 // Mode tracking
@@ -134,12 +133,6 @@ async function toggleCameraMode() {
     return;
   }
 
-  // Clean up image processing result
-  if (currentResult) {
-    currentResult.texture.destroy();
-    currentResult = null;
-  }
-
   currentMode = "camera";
   imageControls.classList.add("hidden");
   cameraButton.textContent = "Stop Camera";
@@ -176,12 +169,6 @@ async function processAndRender(imageBitmap: ImageBitmap, saveImage = true) {
 
     setStatus("Processing image...", "info");
 
-    // Clean up previous result
-    if (currentResult) {
-      currentResult.texture.destroy();
-      currentResult = null;
-    }
-
     // Store the image bitmap for potential reprocessing (e.g., orientation change)
     if (saveImage) {
       currentImageBitmap = imageBitmap;
@@ -190,17 +177,15 @@ async function processAndRender(imageBitmap: ImageBitmap, saveImage = true) {
     // Disable download button while processing
     downloadButton.disabled = true;
 
-    // Process the image
-    currentResult = await proc.processImage(imageBitmap);
-
-    // Render to canvas
-    await proc.renderToCanvas(canvas, currentResult);
+    // Render image directly to canvas (unified flow)
+    await proc.renderImage(canvas, imageBitmap);
 
     // Enable download button
     downloadButton.disabled = false;
 
+    // Get canvas dimensions for status message
     setStatus(
-      `Image processed successfully. Output size: ${currentResult.width}x${currentResult.height}`,
+      `Image processed successfully. Output size: ${canvas.width}x${canvas.height}`,
       "success",
     );
   } catch (error) {
@@ -216,7 +201,7 @@ async function processAndRender(imageBitmap: ImageBitmap, saveImage = true) {
 // Handle camera button click
 cameraButton.addEventListener("click", toggleCameraMode);
 
-// Handle export button click
+// Handle export button click (camera mode)
 exportButton.addEventListener("click", async () => {
   if (!processor?.isCameraRunning()) {
     setStatus("Camera is not running", "error");
@@ -225,7 +210,7 @@ exportButton.addEventListener("click", async () => {
 
   try {
     setStatus("Exporting frame...", "info");
-    const blob = await processor.exportCameraFrame("image/png");
+    const blob = await processor.exportFrame("image/png");
 
     if (!blob) {
       setStatus("Failed to export frame", "error");
@@ -328,51 +313,35 @@ fileInput.addEventListener("change", async (e) => {
   }
 });
 
-// Download canvas image
+// Download canvas image (unified export for both modes)
 async function downloadImage() {
-  if (!currentResult || !processor) {
+  if (!processor) {
     setStatus("No image to download", "error");
     return;
   }
 
   try {
-    setStatus("Reading image data from GPU...", "info");
+    setStatus("Exporting image...", "info");
 
-    // Read texture back from GPU to ImageData
-    const imageData = await processor.readbackImageData(currentResult);
+    // Use unified exportFrame (works for both image and camera modes)
+    const blob = await processor.exportFrame("image/png");
 
-    // Create a temporary 2D canvas to convert ImageData to blob
-    const tempCanvas = document.createElement("canvas");
-    tempCanvas.width = imageData.width;
-    tempCanvas.height = imageData.height;
-    const ctx = tempCanvas.getContext("2d");
-    if (!ctx) {
-      setStatus("Failed to create 2D canvas context", "error");
+    if (!blob) {
+      setStatus("Failed to export image", "error");
       return;
     }
 
-    // Draw ImageData to 2D canvas
-    ctx.putImageData(imageData, 0, 0);
+    // Create download link
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `crt-subpixel-${Date.now()}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 
-    // Convert canvas to blob and create download link
-    tempCanvas.toBlob((blob) => {
-      if (!blob) {
-        setStatus("Failed to create image blob", "error");
-        return;
-      }
-
-      // Create download link
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `crt-subpixel-${Date.now()}.png`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      setStatus("Image downloaded!", "success");
-    }, "image/png");
+    setStatus("Image downloaded!", "success");
   } catch (error) {
     setStatus(
       `Failed to download image: ${error instanceof Error ? error.message : String(error)}`,

@@ -7,21 +7,21 @@ import * as d from "typegpu/data";
 import * as std from "typegpu/std";
 
 /**
- * Bind group layout for image subpixel shader (regular texture)
+ * Bind group layout for regular texture subpixel shader
  */
-export const imageBindGroupLayout = tgpu.bindGroupLayout({
+export const textureBindGroupLayout = tgpu.bindGroupLayout({
   inputTexture: { texture: d.texture2d(d.f32) },
 });
 
 /**
- * Bind group layout for video subpixel shader (external texture)
+ * Bind group layout for external texture subpixel shader (video/camera)
  */
-export const videoBindGroupLayout = tgpu.bindGroupLayout({
+export const externalTextureBindGroupLayout = tgpu.bindGroupLayout({
   externalTexture: { externalTexture: d.textureExternal() },
 });
 
 /**
- * Create the unified subpixel fragment shader for images (regular texture)
+ * Create the subpixel fragment shader for regular textures (images)
  *
  * Implements the same 3x3 RGB stripe pattern:
  * - Each input pixel becomes a 3x3 block
@@ -34,7 +34,7 @@ export const videoBindGroupLayout = tgpu.bindGroupLayout({
  *   - Rows 1, 4, 7... show only green channel
  *   - Rows 2, 5, 8... show only blue channel
  */
-export function createImageSubpixelFragment(
+export function createTextureSubpixelFragment(
   sampler: TgpuSampler,
   outputDimensions: TgpuUniform<d.Vec2u>,
   inputDimensions: TgpuUniform<d.Vec2u>,
@@ -73,7 +73,7 @@ export function createImageSubpixelFragment(
 
     // Sample the texture using textureSample (for regular textures)
     const inputColor = std.textureSample(
-      imageBindGroupLayout.$.inputTexture,
+      textureBindGroupLayout.$.inputTexture,
       sampler.$,
       inputUV,
     );
@@ -96,12 +96,12 @@ export function createImageSubpixelFragment(
 }
 
 /**
- * Create the unified subpixel fragment shader for video (external texture)
+ * Create the subpixel fragment shader for external textures (video/camera)
  *
- * Same pattern as image shader, but uses textureSampleBaseClampToEdge
+ * Same pattern as texture shader, but uses textureSampleBaseClampToEdge
  * which is required for external textures.
  */
-export function createVideoSubpixelFragment(
+export function createExternalTextureSubpixelFragment(
   sampler: TgpuSampler,
   outputDimensions: TgpuUniform<d.Vec2u>,
   inputDimensions: TgpuUniform<d.Vec2u>,
@@ -138,9 +138,9 @@ export function createVideoSubpixelFragment(
     const inputDims = d.vec2f(inputDimensions.$.x, inputDimensions.$.y);
     const inputUV = groupedPixel.div(inputDims);
 
-    // Sample the video texture using textureSampleBaseClampToEdge (required for external textures)
+    // Sample the external texture using textureSampleBaseClampToEdge (required for external textures)
     const inputColor = std.textureSampleBaseClampToEdge(
-      videoBindGroupLayout.$.externalTexture,
+      externalTextureBindGroupLayout.$.externalTexture,
       sampler.$,
       inputUV,
     );

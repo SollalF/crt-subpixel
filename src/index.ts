@@ -5,14 +5,11 @@
  * Each input pixel is expanded into a 3x3 block with vertical RGB stripes.
  *
  * Supports both static images and real-time camera input.
+ * Both render directly to canvas and use canvas.toBlob() for export.
  *
  * Browser Support: Chrome/Edge desktop (requires secure context)
  */
 
-import { processImage } from "./pipeline/process.js";
-import { readTextureToImageData } from "./utils/readback.js";
-import { renderTextureToCanvas } from "./utils/render.js";
-import type { ProcessResult } from "./types.js";
 import tgpu, {
   type TgpuRoot,
   type TgpuUniform,
@@ -28,27 +25,30 @@ import {
 
 // Import fragment shaders
 import {
-  createImageSubpixelFragment,
-  createVideoSubpixelFragment,
-  videoBindGroupLayout,
+  createTextureSubpixelFragment,
+  createExternalTextureSubpixelFragment,
+  textureBindGroupLayout,
+  externalTextureBindGroupLayout,
 } from "./shaders/subpixel-fragment.js";
 
 /**
  * Main processor class for CRT subpixel expansion
  *
  * Supports both static image processing and real-time camera input.
+ * Both modes render directly to canvas and use canvas.toBlob() for export.
  *
  * @example
  * ```typescript
- * // Static image processing
  * const processor = new CrtSubpixelProcessor();
  * await processor.init();
- * const result = await processor.processImage(imageBitmap);
- * await processor.renderToCanvas(canvas, result);
+ *
+ * // Static image processing
+ * await processor.renderImage(canvas, imageBitmap);
+ * const blob = await processor.exportFrame();
  *
  * // Camera mode
  * await processor.startCamera(canvas);
- * // ... later
+ * const frameBlob = await processor.exportFrame();
  * processor.stopCamera();
  *
  * processor.destroy();
@@ -67,25 +67,23 @@ export class CrtSubpixelProcessor {
   private pixelDensityBuffer: TgpuUniform<d.U32> | null = null;
   private currentPixelDensity = 1;
 
-  // The pipelines for image and camera processing are separate because we load the data different ways
-  // Image pipeline uses the texture.write() function from TypeGPU as documented in: https://docs.swmansion.com/TypeGPU/fundamentals/textures/#writing-to-a-texture
-  // Camera pipeline uses the underlying WebGPU function root.device.importExternalTexture()
-  // to import from the camera feed as show in the examplehttps://docs.swmansion.com/TypeGPU/examples/#example=image-processing--ascii-filter
-  // It seems TypeGPU is missing a few functionalities for textures
-  // For the moment I'm leaving them as is but ideally if Type GPU implements both, we should update the code to use the new functionality
+  // Two pipelines are needed due to WebGPU texture type constraints:
+  // - texturePipeline: uses textureSample with texture2d for static images
+  // - externalTexturePipeline: uses textureSampleBaseClampToEdge with textureExternal for video
+  // Both render directly to canvas with unified export via canvas.toBlob()
+  private texturePipeline: TgpuRenderPipeline | null = null;
+  private externalTexturePipeline: TgpuRenderPipeline | null = null;
 
-  // Image processing pipeline
-  private imagePipeline: TgpuRenderPipeline | null = null;
+  // Current canvas and context (shared between image and camera modes)
+  private currentCanvas: HTMLCanvasElement | null = null;
+  private currentContext: GPUCanvasContext | null = null;
 
-  // Camera processing pipeline and state
-  private cameraPipeline: TgpuRenderPipeline | null = null;
+  // Camera-specific state
   private cameraStream: CameraStream | null = null;
   private videoFrameCallbackId: number | undefined;
-  private cameraCanvas: HTMLCanvasElement | null = null;
-  private cameraContext: GPUCanvasContext | null = null;
   private lastFrameSize: { width: number; height: number } | null = null;
 
-  // Pending export request (resolved after next frame render)
+  // Pending export request (resolved after render completes)
   private pendingExport: {
     resolve: (blob: Blob | null) => void;
     type: string;
@@ -141,31 +139,31 @@ export class CrtSubpixelProcessor {
       d.vec2u(1, 1),
     );
 
-    // Create image processing pipeline (for static images)
-    const imageFragmentFn = createImageSubpixelFragment(
+    // Create texture pipeline (for static images - renders directly to canvas)
+    const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+    const textureFragmentFn = createTextureSubpixelFragment(
       this.sampler,
       this.outputDimensionsBuffer,
       this.inputDimensionsBuffer,
       this.orientationBuffer,
       this.pixelDensityBuffer,
     );
-    this.imagePipeline = this.root["~unstable"]
+    this.texturePipeline = this.root["~unstable"]
       .withVertex(fullScreenTriangle, {})
-      .withFragment(imageFragmentFn, { format: "rgba8unorm" })
+      .withFragment(textureFragmentFn, { format: presentationFormat })
       .createPipeline();
 
-    // Create camera processing pipeline (for video/external textures)
-    const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-    const videoFragmentFn = createVideoSubpixelFragment(
+    // Create external texture pipeline (for video/camera - renders directly to canvas)
+    const externalTextureFragmentFn = createExternalTextureSubpixelFragment(
       this.sampler,
       this.outputDimensionsBuffer,
       this.inputDimensionsBuffer,
       this.orientationBuffer,
       this.pixelDensityBuffer,
     );
-    this.cameraPipeline = this.root["~unstable"]
+    this.externalTexturePipeline = this.root["~unstable"]
       .withVertex(fullScreenTriangle, {})
-      .withFragment(videoFragmentFn, { format: presentationFormat })
+      .withFragment(externalTextureFragmentFn, { format: presentationFormat })
       .createPipeline();
 
     console.log("Pipelines created successfully");
@@ -174,86 +172,112 @@ export class CrtSubpixelProcessor {
   }
 
   // ============================================
-  // Static Image Processing
+  // Image Rendering
   // ============================================
 
   /**
-   * Process an image and expand it into CRT subpixel pattern
+   * Render an image with CRT subpixel effect directly to canvas
    *
+   * @param canvas Target canvas element for rendering
    * @param input Image to process (ImageBitmap - JPEG/PNG formats)
-   * @returns Result containing output texture and dimensions (3x input size)
-   * @throws Error if not initialized or processing fails
+   * @throws Error if not initialized or rendering fails
    */
-  async processImage(input: ImageBitmap): Promise<ProcessResult> {
+  async renderImage(
+    canvas: HTMLCanvasElement,
+    input: ImageBitmap,
+  ): Promise<void> {
     if (
       !this.initialized ||
       !this.root ||
-      !this.imagePipeline ||
-      !this.outputDimensionsBuffer
+      !this.texturePipeline ||
+      !this.outputDimensionsBuffer ||
+      !this.inputDimensionsBuffer
     ) {
       throw new Error(
-        "Processor not initialized. Call init() before processing images.",
+        "Processor not initialized. Call init() before rendering images.",
       );
     }
 
-    // Update input dimensions uniform with actual input texture size
-    if (this.inputDimensionsBuffer) {
-      this.inputDimensionsBuffer.write(d.vec2u(input.width, input.height));
+    // Stop camera if running (switching to image mode)
+    if (this.isCameraRunning()) {
+      this.stopCamera();
     }
 
-    // Update output dimensions uniform based on input size and pixel density
-    // Output = (input / density) * 3, since each logical pixel becomes a 3x3 RGB block
+    // Configure canvas context
+    const context = canvas.getContext("webgpu");
+    if (!context) {
+      throw new Error("Failed to get WebGPU context from canvas");
+    }
+
+    this.currentCanvas = canvas;
+    this.currentContext = context;
+
+    const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+    context.configure({
+      device: this.root.device,
+      format: presentationFormat,
+      alphaMode: "premultiplied",
+    });
+
+    // Update input dimensions uniform
+    this.inputDimensionsBuffer.write(d.vec2u(input.width, input.height));
+
+    // Calculate output dimensions (3x expansion adjusted for pixel density)
     const logicalWidth = input.width / this.currentPixelDensity;
     const logicalHeight = input.height / this.currentPixelDensity;
     const outputWidth = Math.floor(logicalWidth * 3);
     const outputHeight = Math.floor(logicalHeight * 3);
+
+    // Set canvas size (3x input for full detail)
+    const canvasWidth = Math.floor(input.width * 3);
+    const canvasHeight = Math.floor(input.height * 3);
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+
+    // Update output dimensions uniform
     this.outputDimensionsBuffer.write(d.vec2u(outputWidth, outputHeight));
 
-    const result = await processImage(this.root, this.imagePipeline, input);
+    // Create sampled texture from ImageBitmap
+    const inputTexture = this.root["~unstable"]
+      .createTexture({
+        size: [input.width, input.height],
+        format: "rgba8unorm",
+      })
+      .$usage("sampled")
+      .$usage("render");
 
-    return {
-      texture: result.texture,
-      width: result.width,
-      height: result.height,
-    };
-  }
+    // Copy ImageBitmap to texture
+    inputTexture.write(input);
 
-  /**
-   * Read back a processed texture to ImageData
-   *
-   * @param result Process result from processImage()
-   * @returns ImageData containing the subpixel-expanded image
-   */
-  async readbackImageData(result: ProcessResult): Promise<ImageData> {
-    if (!this.initialized || !this.root) {
-      throw new Error("Processor not initialized");
-    }
+    // Create bind group with input texture
+    const bindGroup = this.root.createBindGroup(textureBindGroupLayout, {
+      inputTexture: inputTexture,
+    });
 
-    return readTextureToImageData(
-      this.root,
-      result.texture,
-      result.width,
-      result.height,
+    // Render directly to canvas
+    this.texturePipeline
+      .with(bindGroup)
+      .withColorAttachment({
+        view: context.getCurrentTexture().createView(),
+        loadOp: "clear",
+        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        storeOp: "store",
+      })
+      .draw(3);
+
+    // Wait for GPU to finish
+    await this.root.device.queue.onSubmittedWorkDone();
+
+    // Clean up input texture
+    inputTexture.destroy();
+
+    // Update canvas aspect ratio
+    const aspectRatio = input.width / input.height;
+    canvas.style.aspectRatio = `${aspectRatio}`;
+
+    console.log(
+      `Image rendered: ${canvasWidth}x${canvasHeight}, logical pixels ${outputWidth}x${outputHeight}`,
     );
-  }
-
-  /**
-   * Render a processed texture directly to a canvas
-   * This avoids the need for CPU readback and is much faster
-   *
-   * @param canvas HTMLCanvasElement with WebGPU context
-   * @param result Process result from processImage()
-   * @throws Error if not initialized or canvas context is invalid
-   */
-  async renderToCanvas(
-    canvas: HTMLCanvasElement,
-    result: ProcessResult,
-  ): Promise<void> {
-    if (!this.initialized || !this.root) {
-      throw new Error("Processor not initialized");
-    }
-
-    return renderTextureToCanvas(this.root, canvas, result);
   }
 
   // ============================================
@@ -271,21 +295,21 @@ export class CrtSubpixelProcessor {
     canvas: HTMLCanvasElement,
     options?: CameraOptions,
   ): Promise<void> {
-    if (!this.initialized || !this.root || !this.cameraPipeline) {
+    if (!this.initialized || !this.root || !this.externalTexturePipeline) {
       throw new Error("Processor not initialized. Call init() first.");
     }
 
     // Stop existing camera if running
     this.stopCamera();
 
-    this.cameraCanvas = canvas;
+    this.currentCanvas = canvas;
 
     // Configure canvas context
     const context = canvas.getContext("webgpu");
     if (!context) {
       throw new Error("Failed to get WebGPU context from canvas");
     }
-    this.cameraContext = context;
+    this.currentContext = context;
 
     const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
     context.configure({
@@ -311,6 +335,7 @@ export class CrtSubpixelProcessor {
 
   /**
    * Stop camera and clean up camera resources
+   * Note: This does not clear currentCanvas/currentContext as they may be used for image mode
    */
   stopCamera(): void {
     if (this.videoFrameCallbackId !== undefined && this.cameraStream) {
@@ -325,11 +350,9 @@ export class CrtSubpixelProcessor {
       this.cameraStream = null;
     }
 
-    this.cameraCanvas = null;
-    this.cameraContext = null;
     this.lastFrameSize = null;
 
-    // Resolve any pending export with null
+    // Resolve any pending camera export with null
     if (this.pendingExport) {
       this.pendingExport.resolve(null);
       this.pendingExport = null;
@@ -346,27 +369,35 @@ export class CrtSubpixelProcessor {
   }
 
   /**
-   * Export the current camera canvas frame as an image blob
+   * Export the current canvas frame as an image blob
    *
-   * Captures the frame immediately after the next render to ensure
-   * the canvas has valid content (WebGPU canvases are cleared after present).
+   * Works in both image and camera modes:
+   * - In image mode: exports immediately (canvas already has content)
+   * - In camera mode: captures after the next render (WebGPU clears after present)
    *
    * @param type Image MIME type (e.g., 'image/png', 'image/jpeg')
    * @param quality For lossy formats like JPEG, quality from 0 to 1
-   * @returns Promise resolving to the image Blob, or null if camera is not running
+   * @returns Promise resolving to the image Blob, or null if no canvas is active
    */
-  async exportCameraFrame(
+  async exportFrame(
     type: string = "image/png",
     quality?: number,
   ): Promise<Blob | null> {
-    if (!this.cameraCanvas || !this.isCameraRunning()) {
-      console.warn("Camera is not running, cannot export frame");
+    if (!this.currentCanvas) {
+      console.warn("No canvas is active, cannot export frame");
       return null;
     }
 
-    // Set up pending export - will be resolved after next frame render
+    // In camera mode, wait for next frame render
+    if (this.isCameraRunning()) {
+      return new Promise((resolve) => {
+        this.pendingExport = { resolve, type, quality };
+      });
+    }
+
+    // In image mode, export immediately (canvas already has content)
     return new Promise((resolve) => {
-      this.pendingExport = { resolve, type, quality };
+      this.currentCanvas!.toBlob((blob) => resolve(blob), type, quality);
     });
   }
 
@@ -408,7 +439,7 @@ export class CrtSubpixelProcessor {
     // If camera is running, update canvas size to match new density
     // Canvas size = (input / density) * 3, so it changes when density changes
     if (this.isCameraRunning() && this.lastFrameSize) {
-      this.updateCameraCanvasSize(
+      this.updateCanvasSize(
         this.lastFrameSize.width,
         this.lastFrameSize.height,
       );
@@ -431,10 +462,10 @@ export class CrtSubpixelProcessor {
   ): void {
     if (
       !this.root ||
-      !this.cameraContext ||
-      !this.cameraCanvas ||
+      !this.currentContext ||
+      !this.currentCanvas ||
       !this.cameraStream ||
-      !this.cameraPipeline ||
+      !this.externalTexturePipeline ||
       !this.outputDimensionsBuffer
     ) {
       return;
@@ -465,21 +496,24 @@ export class CrtSubpixelProcessor {
       this.lastFrameSize.height !== frameHeight
     ) {
       this.lastFrameSize = { width: frameWidth, height: frameHeight };
-      this.updateCameraCanvasSize(frameWidth, frameHeight);
+      this.updateCanvasSize(frameWidth, frameHeight);
     }
 
     // Create bind group with external texture (must be done each frame)
-    const bindGroup = this.root.createBindGroup(videoBindGroupLayout, {
-      externalTexture: this.root.device.importExternalTexture({
-        source: video,
-      }),
-    });
+    const bindGroup = this.root.createBindGroup(
+      externalTextureBindGroupLayout,
+      {
+        externalTexture: this.root.device.importExternalTexture({
+          source: video,
+        }),
+      },
+    );
 
     // Render to canvas
-    this.cameraPipeline
+    this.externalTexturePipeline
       .with(bindGroup)
       .withColorAttachment({
-        view: this.cameraContext.getCurrentTexture().createView(),
+        view: this.currentContext.getCurrentTexture().createView(),
         loadOp: "clear",
         clearValue: { r: 0, g: 0, b: 0, a: 1 },
         storeOp: "store",
@@ -487,11 +521,11 @@ export class CrtSubpixelProcessor {
       .draw(3);
 
     // Handle pending export request (capture immediately after render)
-    if (this.pendingExport && this.cameraCanvas) {
+    if (this.pendingExport && this.currentCanvas) {
       const { resolve, type, quality } = this.pendingExport;
       this.pendingExport = null;
 
-      this.cameraCanvas.toBlob((blob) => resolve(blob), type, quality);
+      this.currentCanvas.toBlob((blob) => resolve(blob), type, quality);
     }
 
     // Schedule next frame
@@ -501,15 +535,12 @@ export class CrtSubpixelProcessor {
   }
 
   /**
-   * Update canvas size based on video frame dimensions
+   * Update canvas size based on input dimensions
    * Output is 3x the input size for subpixel expansion
    * Canvas size stays constant to show pixelation effect
    */
-  private updateCameraCanvasSize(
-    frameWidth: number,
-    frameHeight: number,
-  ): void {
-    if (!this.cameraCanvas || !this.outputDimensionsBuffer) {
+  private updateCanvasSize(frameWidth: number, frameHeight: number): void {
+    if (!this.currentCanvas || !this.outputDimensionsBuffer) {
       return;
     }
 
@@ -518,8 +549,8 @@ export class CrtSubpixelProcessor {
     const canvasWidth = Math.floor(frameWidth * 3);
     const canvasHeight = Math.floor(frameHeight * 3);
 
-    this.cameraCanvas.width = canvasWidth;
-    this.cameraCanvas.height = canvasHeight;
+    this.currentCanvas.width = canvasWidth;
+    this.currentCanvas.height = canvasHeight;
 
     // Output dimensions for shader: (input / density) * 3
     // This tells the shader to render fewer pixels, which will be stretched to fill the canvas
@@ -533,10 +564,10 @@ export class CrtSubpixelProcessor {
 
     // Update canvas display aspect ratio
     const aspectRatio = frameWidth / frameHeight;
-    this.cameraCanvas.style.aspectRatio = `${aspectRatio}`;
+    this.currentCanvas.style.aspectRatio = `${aspectRatio}`;
 
     console.log(
-      `Camera canvas size: ${canvasWidth}x${canvasHeight}, rendering ${outputWidth}x${outputHeight} pixels`,
+      `Canvas size: ${canvasWidth}x${canvasHeight}, rendering ${outputWidth}x${outputHeight} pixels`,
     );
   }
 
@@ -563,12 +594,13 @@ export class CrtSubpixelProcessor {
     this.inputDimensionsBuffer = null;
     this.orientationBuffer = null;
     this.pixelDensityBuffer = null;
-    this.imagePipeline = null;
-    this.cameraPipeline = null;
+    this.texturePipeline = null;
+    this.externalTexturePipeline = null;
+    this.currentCanvas = null;
+    this.currentContext = null;
     this.initialized = false;
   }
 }
 
 // Re-export types
-export type { ProcessResult } from "./types.js";
 export type { CameraOptions } from "./utils/camera.js";
