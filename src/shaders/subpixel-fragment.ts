@@ -2,7 +2,7 @@
  * Unified fragment shader for CRT subpixel effect
  * Works with both regular textures (images) and external textures (video)
  */
-import tgpu, { type TgpuRoot, type TgpuUniform } from "typegpu";
+import tgpu, { type TgpuSampler, type TgpuUniform } from "typegpu";
 import * as d from "typegpu/data";
 import * as std from "typegpu/std";
 
@@ -20,12 +20,6 @@ export const videoBindGroupLayout = tgpu.bindGroupLayout({
   externalTexture: { externalTexture: d.textureExternal() },
 });
 
-/** Type for sampler created by TypeGPU */
-type TgpuSampler = ReturnType<TgpuRoot["~unstable"]["createSampler"]>;
-
-/** Type for vec2u uniform created by TypeGPU */
-type Vec2uUniform = TgpuUniform<d.Vec2u>;
-
 /**
  * Create the unified subpixel fragment shader for images (regular texture)
  *
@@ -37,7 +31,7 @@ type Vec2uUniform = TgpuUniform<d.Vec2u>;
  */
 export function createImageSubpixelFragment(
   sampler: TgpuSampler,
-  outputDimensions: Vec2uUniform,
+  outputDimensions: TgpuUniform<d.Vec2u>,
 ) {
   return tgpu["~unstable"].fragmentFn({
     in: { uv: d.vec2f },
@@ -87,7 +81,7 @@ export function createImageSubpixelFragment(
  */
 export function createVideoSubpixelFragment(
   sampler: TgpuSampler,
-  outputDimensions: Vec2uUniform,
+  outputDimensions: TgpuUniform<d.Vec2u>,
 ) {
   return tgpu["~unstable"].fragmentFn({
     in: { uv: d.vec2f },
