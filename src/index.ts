@@ -23,12 +23,10 @@ import {
   type CameraStream,
 } from "./utils/camera.js";
 
-// Import fragment shaders
+// Import fragment shader
 import {
-  createTextureSubpixelFragment,
-  createExternalTextureSubpixelFragment,
-  textureBindGroupLayout,
-  externalTextureBindGroupLayout,
+  createSubpixelFragment,
+  bindGroupLayout,
 } from "./shaders/subpixel-fragment.js";
 
 /**
@@ -67,12 +65,9 @@ export class CrtSubpixelProcessor {
   private pixelDensityBuffer: TgpuUniform<d.U32> | null = null;
   private currentPixelDensity = 1;
 
-  // Two pipelines are needed due to WebGPU texture type constraints:
-  // - texturePipeline: uses textureSample with texture2d for static images
-  // - externalTexturePipeline: uses textureSampleBaseClampToEdge with textureExternal for video
-  // Both render directly to canvas with unified export via canvas.toBlob()
-  private texturePipeline: TgpuRenderPipeline | null = null;
-  private externalTexturePipeline: TgpuRenderPipeline | null = null;
+  // Single unified pipeline using external textures for both images and camera
+  // Images are converted to VideoFrame to use the same external texture path
+  private pipeline: TgpuRenderPipeline | null = null;
 
   // Current canvas and context (shared between image and camera modes)
   private currentCanvas: HTMLCanvasElement | null = null;
@@ -139,34 +134,22 @@ export class CrtSubpixelProcessor {
       d.vec2u(1, 1),
     );
 
-    // Create texture pipeline (for static images - renders directly to canvas)
+    // Create unified pipeline (renders directly to canvas)
+    // Uses external textures for both images (via VideoFrame) and camera
     const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-    const textureFragmentFn = createTextureSubpixelFragment(
+    const fragmentFn = createSubpixelFragment(
       this.sampler,
       this.outputDimensionsBuffer,
       this.inputDimensionsBuffer,
       this.orientationBuffer,
       this.pixelDensityBuffer,
     );
-    this.texturePipeline = this.root["~unstable"]
+    this.pipeline = this.root["~unstable"]
       .withVertex(fullScreenTriangle, {})
-      .withFragment(textureFragmentFn, { format: presentationFormat })
+      .withFragment(fragmentFn, { format: presentationFormat })
       .createPipeline();
 
-    // Create external texture pipeline (for video/camera - renders directly to canvas)
-    const externalTextureFragmentFn = createExternalTextureSubpixelFragment(
-      this.sampler,
-      this.outputDimensionsBuffer,
-      this.inputDimensionsBuffer,
-      this.orientationBuffer,
-      this.pixelDensityBuffer,
-    );
-    this.externalTexturePipeline = this.root["~unstable"]
-      .withVertex(fullScreenTriangle, {})
-      .withFragment(externalTextureFragmentFn, { format: presentationFormat })
-      .createPipeline();
-
-    console.log("Pipelines created successfully");
+    console.log("Pipeline created successfully");
 
     this.initialized = true;
   }
@@ -189,7 +172,7 @@ export class CrtSubpixelProcessor {
     if (
       !this.initialized ||
       !this.root ||
-      !this.texturePipeline ||
+      !this.pipeline ||
       !this.outputDimensionsBuffer ||
       !this.inputDimensionsBuffer
     ) {
@@ -237,26 +220,19 @@ export class CrtSubpixelProcessor {
     // Update output dimensions uniform
     this.outputDimensionsBuffer.write(d.vec2u(outputWidth, outputHeight));
 
-    // Create sampled texture from ImageBitmap
-    const inputTexture = this.root["~unstable"]
-      .createTexture({
-        size: [input.width, input.height],
-        format: "rgba8unorm",
-      })
-      .$usage("sampled")
-      .$usage("render");
+    // Convert ImageBitmap to VideoFrame for use with external texture
+    const videoFrame = new VideoFrame(input, { timestamp: 0 });
 
-    // Copy ImageBitmap to texture
-    inputTexture.write(input);
-
-    // Create bind group with input texture
-    const bindGroup = this.root.createBindGroup(textureBindGroupLayout, {
-      inputTexture: inputTexture,
+    // Create bind group with external texture from VideoFrame
+    const gpuExternalTexture = this.root.createBindGroup(bindGroupLayout, {
+      externalTexture: this.root.device.importExternalTexture({
+        source: videoFrame,
+      }),
     });
 
-    // Render directly to canvas
-    this.texturePipeline
-      .with(bindGroup)
+    // Render directly to canvas using the unified pipeline
+    this.pipeline
+      .with(gpuExternalTexture)
       .withColorAttachment({
         view: context.getCurrentTexture().createView(),
         loadOp: "clear",
@@ -268,8 +244,8 @@ export class CrtSubpixelProcessor {
     // Wait for GPU to finish
     await this.root.device.queue.onSubmittedWorkDone();
 
-    // Clean up input texture
-    inputTexture.destroy();
+    // Clean up VideoFrame
+    videoFrame.close();
 
     // Update canvas aspect ratio
     const aspectRatio = input.width / input.height;
@@ -295,7 +271,7 @@ export class CrtSubpixelProcessor {
     canvas: HTMLCanvasElement,
     options?: CameraOptions,
   ): Promise<void> {
-    if (!this.initialized || !this.root || !this.externalTexturePipeline) {
+    if (!this.initialized || !this.root || !this.pipeline) {
       throw new Error("Processor not initialized. Call init() first.");
     }
 
@@ -465,7 +441,7 @@ export class CrtSubpixelProcessor {
       !this.currentContext ||
       !this.currentCanvas ||
       !this.cameraStream ||
-      !this.externalTexturePipeline ||
+      !this.pipeline ||
       !this.outputDimensionsBuffer
     ) {
       return;
@@ -500,18 +476,15 @@ export class CrtSubpixelProcessor {
     }
 
     // Create bind group with external texture (must be done each frame)
-    const bindGroup = this.root.createBindGroup(
-      externalTextureBindGroupLayout,
-      {
-        externalTexture: this.root.device.importExternalTexture({
-          source: video,
-        }),
-      },
-    );
+    const externalTexture = this.root.createBindGroup(bindGroupLayout, {
+      externalTexture: this.root.device.importExternalTexture({
+        source: video,
+      }),
+    });
 
     // Render to canvas
-    this.externalTexturePipeline
-      .with(bindGroup)
+    this.pipeline
+      .with(externalTexture)
       .withColorAttachment({
         view: this.currentContext.getCurrentTexture().createView(),
         loadOp: "clear",
@@ -594,8 +567,7 @@ export class CrtSubpixelProcessor {
     this.inputDimensionsBuffer = null;
     this.orientationBuffer = null;
     this.pixelDensityBuffer = null;
-    this.texturePipeline = null;
-    this.externalTexturePipeline = null;
+    this.pipeline = null;
     this.currentCanvas = null;
     this.currentContext = null;
     this.initialized = false;
