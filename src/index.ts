@@ -457,6 +457,7 @@ export class CrtSubpixelProcessor {
   /**
    * Update canvas size based on video frame dimensions
    * Output is 3x the input size for subpixel expansion
+   * Canvas size stays constant to show pixelation effect
    */
   private updateCameraCanvasSize(
     frameWidth: number,
@@ -466,23 +467,31 @@ export class CrtSubpixelProcessor {
       return;
     }
 
-    // Output = (input / density) * 3, since each logical pixel becomes a 3x3 RGB block
+    // Canvas size stays constant (3x input) regardless of density
+    // This allows us to see the pixelation effect
+    const canvasWidth = Math.floor(frameWidth * 3);
+    const canvasHeight = Math.floor(frameHeight * 3);
+
+    this.cameraCanvas.width = canvasWidth;
+    this.cameraCanvas.height = canvasHeight;
+
+    // Output dimensions for shader: (input / density) * 3
+    // This tells the shader to render fewer pixels, which will be stretched to fill the canvas
     const logicalWidth = frameWidth / this.currentPixelDensity;
     const logicalHeight = frameHeight / this.currentPixelDensity;
     const outputWidth = Math.floor(logicalWidth * 3);
     const outputHeight = Math.floor(logicalHeight * 3);
 
-    this.cameraCanvas.width = outputWidth;
-    this.cameraCanvas.height = outputHeight;
-
-    // Update dimensions uniform
+    // Update dimensions uniform (this controls how many pixels the shader renders)
     this.outputDimensionsBuffer.write(d.vec2u(outputWidth, outputHeight));
 
     // Update canvas display aspect ratio
     const aspectRatio = frameWidth / frameHeight;
     this.cameraCanvas.style.aspectRatio = `${aspectRatio}`;
 
-    console.log(`Camera canvas resized to ${outputWidth}x${outputHeight}`);
+    console.log(
+      `Camera canvas size: ${canvasWidth}x${canvasHeight}, rendering ${outputWidth}x${outputHeight} pixels`,
+    );
   }
 
   // ============================================
