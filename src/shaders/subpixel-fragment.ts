@@ -25,13 +25,21 @@ export const videoBindGroupLayout = tgpu.bindGroupLayout({
  *
  * Implements the same 3x3 RGB stripe pattern:
  * - Each input pixel becomes a 3x3 block
- * - Columns 0, 3, 6... show only red channel
- * - Columns 1, 4, 7... show only green channel
- * - Columns 2, 5, 8... show only blue channel
+ * - When orientation is 0 (columns): vertical RGB stripes
+ *   - Columns 0, 3, 6... show only red channel
+ *   - Columns 1, 4, 7... show only green channel
+ *   - Columns 2, 5, 8... show only blue channel
+ * - When orientation is 1 (rows): horizontal RGB stripes
+ *   - Rows 0, 3, 6... show only red channel
+ *   - Rows 1, 4, 7... show only green channel
+ *   - Rows 2, 5, 8... show only blue channel
  */
 export function createImageSubpixelFragment(
   sampler: TgpuSampler,
   outputDimensions: TgpuUniform<d.Vec2u>,
+  inputDimensions: TgpuUniform<d.Vec2u>,
+  orientation: TgpuUniform<d.U32>,
+  pixelDensity: TgpuUniform<d.U32>,
 ) {
   return tgpu["~unstable"].fragmentFn({
     in: { uv: d.vec2f },
@@ -41,13 +49,27 @@ export function createImageSubpixelFragment(
     const outputDims = outputDimensions.$;
     const pixelCoord = input.uv.mul(d.vec2f(outputDims.x, outputDims.y));
 
-    // Calculate which column in the 3x3 block (0, 1, or 2)
+    // Calculate which position in the 3x3 block (0, 1, or 2)
+    // Use X for columns (vertical stripes), Y for rows (horizontal stripes)
     const blockX = d.u32(pixelCoord.x) % 3;
+    const blockY = d.u32(pixelCoord.y) % 3;
+    const blockPos = std.select(blockX, blockY, orientation.$ === 1);
 
-    // Calculate input UV by dividing by 3 (since output is 3x input size)
-    // We sample at the center of the input pixel, not the output pixel
-    const inputPixel = std.floor(pixelCoord.div(3)).add(0.5);
-    const inputUV = inputPixel.div(d.vec2f(outputDims.x, outputDims.y).div(3));
+    // Calculate which logical pixel we're in (output / 3)
+    const logicalPixelCoord = pixelCoord.div(3);
+
+    // Each logical pixel represents 'density' input pixels
+    // Convert logical pixel to input pixel space and sample from center of the group
+    const density = d.f32(pixelDensity.$);
+    const logicalPixelIndex = std.floor(logicalPixelCoord);
+
+    // Each logical pixel represents a group of 'density' input pixels
+    // Sample from the center of that group: logicalPixelIndex * density + density / 2
+    const groupedPixel = logicalPixelIndex.mul(density).add(density / 2.0);
+
+    // Use actual input texture dimensions
+    const inputDims = d.vec2f(inputDimensions.$.x, inputDimensions.$.y);
+    const inputUV = groupedPixel.div(inputDims);
 
     // Sample the texture using textureSample (for regular textures)
     const inputColor = std.textureSample(
@@ -56,12 +78,12 @@ export function createImageSubpixelFragment(
       inputUV,
     );
 
-    // Apply subpixel pattern: vertical RGB stripes
+    // Apply subpixel pattern based on block position
     let outputColor = inputColor;
-    if (blockX === 0) {
+    if (blockPos === 0) {
       // Red stripe: use red channel only
       outputColor = d.vec4f(inputColor.x, 0.0, 0.0, inputColor.w);
-    } else if (blockX === 1) {
+    } else if (blockPos === 1) {
       // Green stripe: use green channel only
       outputColor = d.vec4f(0.0, inputColor.y, 0.0, inputColor.w);
     } else {
@@ -82,6 +104,9 @@ export function createImageSubpixelFragment(
 export function createVideoSubpixelFragment(
   sampler: TgpuSampler,
   outputDimensions: TgpuUniform<d.Vec2u>,
+  inputDimensions: TgpuUniform<d.Vec2u>,
+  orientation: TgpuUniform<d.U32>,
+  pixelDensity: TgpuUniform<d.U32>,
 ) {
   return tgpu["~unstable"].fragmentFn({
     in: { uv: d.vec2f },
@@ -91,13 +116,27 @@ export function createVideoSubpixelFragment(
     const outputDims = outputDimensions.$;
     const pixelCoord = input.uv.mul(d.vec2f(outputDims.x, outputDims.y));
 
-    // Calculate which column in the 3x3 block (0, 1, or 2)
+    // Calculate which position in the 3x3 block (0, 1, or 2)
+    // Use X for columns (vertical stripes), Y for rows (horizontal stripes)
     const blockX = d.u32(pixelCoord.x) % 3;
+    const blockY = d.u32(pixelCoord.y) % 3;
+    const blockPos = std.select(blockX, blockY, orientation.$ === 1);
 
-    // Calculate input UV by dividing by 3 (since output is 3x input size)
-    // We sample at the center of the input pixel, not the output pixel
-    const inputPixel = std.floor(pixelCoord.div(3)).add(0.5);
-    const inputUV = inputPixel.div(d.vec2f(outputDims.x, outputDims.y).div(3));
+    // Calculate which logical pixel we're in (output / 3)
+    const logicalPixelCoord = pixelCoord.div(3);
+
+    // Each logical pixel represents 'density' input pixels
+    // Convert logical pixel to input pixel space and sample from center of the group
+    const density = d.f32(pixelDensity.$);
+    const logicalPixelIndex = std.floor(logicalPixelCoord);
+
+    // Each logical pixel represents a group of 'density' input pixels
+    // Sample from the center of that group: logicalPixelIndex * density + density / 2
+    const groupedPixel = logicalPixelIndex.mul(density).add(density / 2.0);
+
+    // Use actual input texture dimensions
+    const inputDims = d.vec2f(inputDimensions.$.x, inputDimensions.$.y);
+    const inputUV = groupedPixel.div(inputDims);
 
     // Sample the video texture using textureSampleBaseClampToEdge (required for external textures)
     const inputColor = std.textureSampleBaseClampToEdge(
@@ -106,12 +145,12 @@ export function createVideoSubpixelFragment(
       inputUV,
     );
 
-    // Apply subpixel pattern: vertical RGB stripes
+    // Apply subpixel pattern based on block position
     let outputColor = inputColor;
-    if (blockX === 0) {
+    if (blockPos === 0) {
       // Red stripe: use red channel only
       outputColor = d.vec4f(inputColor.x, 0.0, 0.0, inputColor.w);
-    } else if (blockX === 1) {
+    } else if (blockPos === 1) {
       // Green stripe: use green channel only
       outputColor = d.vec4f(0.0, inputColor.y, 0.0, inputColor.w);
     } else {

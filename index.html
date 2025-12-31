@@ -73,6 +73,11 @@
         border-color: #888;
       }
 
+      input[type="range"] {
+        width: 120px;
+        accent-color: #4a8a4a;
+      }
+
       button:disabled {
         opacity: 0.5;
         cursor: not-allowed;
@@ -128,6 +133,19 @@
         <div class="control-group">
           <label for="camera-button">Camera Input:</label>
           <button id="camera-button">Start Camera</button>
+        </div>
+
+        <div class="control-group">
+          <label for="orientation-select">RGB Orientation:</label>
+          <select id="orientation-select">
+            <option value="columns">Columns (Vertical)</option>
+            <option value="rows">Rows (Horizontal)</option>
+          </select>
+        </div>
+
+        <div class="control-group">
+          <label for="density-slider">Pixel Density: <span id="density-value">1</span></label>
+          <input type="range" id="density-slider" min="1" max="16" value="1" />
         </div>
 
         <div class="image-controls" id="image-controls">

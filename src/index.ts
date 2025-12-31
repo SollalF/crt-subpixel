@@ -43,7 +43,7 @@ import {
  * // Static image processing
  * const processor = new CrtSubpixelProcessor();
  * await processor.init();
- * const result = await processor.process(imageBitmap);
+ * const result = await processor.processImage(imageBitmap);
  * await processor.renderToCanvas(canvas, result);
  *
  * // Camera mode
@@ -62,6 +62,10 @@ export class CrtSubpixelProcessor {
   private sampler: ReturnType<TgpuRoot["~unstable"]["createSampler"]> | null =
     null;
   private outputDimensionsBuffer: TgpuUniform<d.Vec2u> | null = null;
+  private inputDimensionsBuffer: TgpuUniform<d.Vec2u> | null = null;
+  private orientationBuffer: TgpuUniform<d.U32> | null = null;
+  private pixelDensityBuffer: TgpuUniform<d.U32> | null = null;
+  private currentPixelDensity = 1;
 
   // The pipelines for image and camera processing are separate because we load the data different ways
   // Image pipeline uses the texture.write() function from TypeGPU as documented in: https://docs.swmansion.com/TypeGPU/fundamentals/textures/#writing-to-a-texture
@@ -115,10 +119,28 @@ export class CrtSubpixelProcessor {
       d.vec2u(1, 1),
     );
 
+    // Create orientation uniform buffer (0 = columns/vertical, 1 = rows/horizontal)
+    this.orientationBuffer = this.root.createUniform(d.u32, 0);
+
+    // Create pixel density uniform buffer (1 = normal, higher = chunkier pixels)
+    this.pixelDensityBuffer = this.root.createUniform(
+      d.u32,
+      this.currentPixelDensity,
+    );
+
+    // Create input dimensions uniform buffer (actual input texture size)
+    this.inputDimensionsBuffer = this.root.createUniform(
+      d.vec2u,
+      d.vec2u(1, 1),
+    );
+
     // Create image processing pipeline (for static images)
     const imageFragmentFn = createImageSubpixelFragment(
       this.sampler,
       this.outputDimensionsBuffer,
+      this.inputDimensionsBuffer,
+      this.orientationBuffer,
+      this.pixelDensityBuffer,
     );
     this.imagePipeline = this.root["~unstable"]
       .withVertex(fullScreenTriangle, {})
@@ -130,6 +152,9 @@ export class CrtSubpixelProcessor {
     const videoFragmentFn = createVideoSubpixelFragment(
       this.sampler,
       this.outputDimensionsBuffer,
+      this.inputDimensionsBuffer,
+      this.orientationBuffer,
+      this.pixelDensityBuffer,
     );
     this.cameraPipeline = this.root["~unstable"]
       .withVertex(fullScreenTriangle, {})
@@ -152,7 +177,7 @@ export class CrtSubpixelProcessor {
    * @returns Result containing output texture and dimensions (3x input size)
    * @throws Error if not initialized or processing fails
    */
-  async process(input: ImageBitmap): Promise<ProcessResult> {
+  async processImage(input: ImageBitmap): Promise<ProcessResult> {
     if (
       !this.initialized ||
       !this.root ||
@@ -164,9 +189,17 @@ export class CrtSubpixelProcessor {
       );
     }
 
-    // Update output dimensions uniform based on input size
-    const outputWidth = input.width * 3;
-    const outputHeight = input.height * 3;
+    // Update input dimensions uniform with actual input texture size
+    if (this.inputDimensionsBuffer) {
+      this.inputDimensionsBuffer.write(d.vec2u(input.width, input.height));
+    }
+
+    // Update output dimensions uniform based on input size and pixel density
+    // Output = (input / density) * 3, since each logical pixel becomes a 3x3 RGB block
+    const logicalWidth = input.width / this.currentPixelDensity;
+    const logicalHeight = input.height / this.currentPixelDensity;
+    const outputWidth = Math.floor(logicalWidth * 3);
+    const outputHeight = Math.floor(logicalHeight * 3);
     this.outputDimensionsBuffer.write(d.vec2u(outputWidth, outputHeight));
 
     const result = await processImage(this.root, this.imagePipeline, input);
@@ -181,7 +214,7 @@ export class CrtSubpixelProcessor {
   /**
    * Read back a processed texture to ImageData
    *
-   * @param result Process result from process()
+   * @param result Process result from processImage()
    * @returns ImageData containing the subpixel-expanded image
    */
   async readbackImageData(result: ProcessResult): Promise<ImageData> {
@@ -202,7 +235,7 @@ export class CrtSubpixelProcessor {
    * This avoids the need for CPU readback and is much faster
    *
    * @param canvas HTMLCanvasElement with WebGPU context
-   * @param result Process result from process()
+   * @param result Process result from processImage()
    * @throws Error if not initialized or canvas context is invalid
    */
   async renderToCanvas(
@@ -300,6 +333,58 @@ export class CrtSubpixelProcessor {
   }
 
   /**
+   * Set the RGB stripe orientation
+   *
+   * @param mode 'columns' for vertical stripes, 'rows' for horizontal stripes
+   */
+  setOrientation(mode: "columns" | "rows"): void {
+    if (!this.orientationBuffer) {
+      console.warn(
+        "Processor not initialized, orientation will be set on init",
+      );
+      return;
+    }
+    this.orientationBuffer.write(mode === "rows" ? 1 : 0);
+  }
+
+  /**
+   * Get the current RGB stripe orientation
+   */
+  getOrientation(): "columns" | "rows" {
+    // Default to columns if not initialized
+    return "columns";
+  }
+
+  /**
+   * Set the pixel density for chunky pixel effect
+   *
+   * @param density Number of input pixels to treat as one logical pixel (1 = normal, 2+ = chunkier)
+   */
+  setPixelDensity(density: number): void {
+    const clampedDensity = Math.max(1, Math.floor(density));
+    this.currentPixelDensity = clampedDensity;
+    if (this.pixelDensityBuffer) {
+      this.pixelDensityBuffer.write(clampedDensity);
+    }
+
+    // If camera is running, update canvas size to match new density
+    // Canvas size = (input / density) * 3, so it changes when density changes
+    if (this.isCameraRunning() && this.lastFrameSize) {
+      this.updateCameraCanvasSize(
+        this.lastFrameSize.width,
+        this.lastFrameSize.height,
+      );
+    }
+  }
+
+  /**
+   * Get the current pixel density
+   */
+  getPixelDensity(): number {
+    return this.currentPixelDensity;
+  }
+
+  /**
    * Process a video frame and render to canvas
    */
   private processVideoFrame(
@@ -329,6 +414,11 @@ export class CrtSubpixelProcessor {
 
     const frameWidth = metadata.width;
     const frameHeight = metadata.height;
+
+    // Update input dimensions uniform with actual video frame size
+    if (this.inputDimensionsBuffer) {
+      this.inputDimensionsBuffer.write(d.vec2u(frameWidth, frameHeight));
+    }
 
     // Update canvas size if frame size changed
     if (
@@ -376,9 +466,11 @@ export class CrtSubpixelProcessor {
       return;
     }
 
-    // Output is 3x input size
-    const outputWidth = frameWidth * 3;
-    const outputHeight = frameHeight * 3;
+    // Output = (input / density) * 3, since each logical pixel becomes a 3x3 RGB block
+    const logicalWidth = frameWidth / this.currentPixelDensity;
+    const logicalHeight = frameHeight / this.currentPixelDensity;
+    const outputWidth = Math.floor(logicalWidth * 3);
+    const outputHeight = Math.floor(logicalHeight * 3);
 
     this.cameraCanvas.width = outputWidth;
     this.cameraCanvas.height = outputHeight;
@@ -413,6 +505,9 @@ export class CrtSubpixelProcessor {
 
     this.sampler = null;
     this.outputDimensionsBuffer = null;
+    this.inputDimensionsBuffer = null;
+    this.orientationBuffer = null;
+    this.pixelDensityBuffer = null;
     this.imagePipeline = null;
     this.cameraPipeline = null;
     this.initialized = false;

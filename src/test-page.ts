@@ -28,6 +28,7 @@ const TEST_IMAGES = [
 // Single unified processor for both images and camera
 let processor: CrtSubpixelProcessor | null = null;
 let currentResult: ProcessResult | null = null;
+let currentImageBitmap: ImageBitmap | null = null;
 
 // Mode tracking
 type Mode = "image" | "camera";
@@ -49,6 +50,15 @@ const cameraButton = document.getElementById(
 const imageControls = document.getElementById(
   "image-controls",
 ) as HTMLDivElement;
+const orientationSelect = document.getElementById(
+  "orientation-select",
+) as HTMLSelectElement;
+const densitySlider = document.getElementById(
+  "density-slider",
+) as HTMLInputElement;
+const densityValue = document.getElementById(
+  "density-value",
+) as HTMLSpanElement;
 
 // Populate test images dropdown
 TEST_IMAGES.forEach((imageName) => {
@@ -147,7 +157,7 @@ async function toggleCameraMode() {
 }
 
 // Process and render image
-async function processAndRender(imageBitmap: ImageBitmap) {
+async function processAndRender(imageBitmap: ImageBitmap, saveImage = true) {
   // Make sure we're in image mode (stops camera if running)
   if (currentMode !== "image") {
     switchToImageMode();
@@ -164,11 +174,16 @@ async function processAndRender(imageBitmap: ImageBitmap) {
       currentResult = null;
     }
 
+    // Store the image bitmap for potential reprocessing (e.g., orientation change)
+    if (saveImage) {
+      currentImageBitmap = imageBitmap;
+    }
+
     // Disable download button while processing
     downloadButton.disabled = true;
 
     // Process the image
-    currentResult = await proc.process(imageBitmap);
+    currentResult = await proc.processImage(imageBitmap);
 
     // Render to canvas
     await proc.renderToCanvas(canvas, currentResult);
@@ -192,6 +207,39 @@ async function processAndRender(imageBitmap: ImageBitmap) {
 
 // Handle camera button click
 cameraButton.addEventListener("click", toggleCameraMode);
+
+// Handle orientation change
+orientationSelect.addEventListener("change", async (e) => {
+  const orientation = (e.target as HTMLSelectElement).value as
+    | "columns"
+    | "rows";
+
+  if (processor) {
+    processor.setOrientation(orientation);
+
+    // For image mode, reprocess the current image with new orientation
+    if (currentMode === "image" && currentImageBitmap) {
+      await processAndRender(currentImageBitmap, false);
+    }
+    // For camera mode, the change takes effect on the next frame automatically
+  }
+});
+
+// Handle pixel density change
+densitySlider.addEventListener("input", async (e) => {
+  const density = parseInt((e.target as HTMLInputElement).value, 10);
+  densityValue.textContent = String(density);
+
+  if (processor) {
+    processor.setPixelDensity(density);
+
+    // For image mode, reprocess the current image with new density
+    if (currentMode === "image" && currentImageBitmap) {
+      await processAndRender(currentImageBitmap, false);
+    }
+    // For camera mode, the change takes effect on the next frame automatically
+  }
+});
 
 // Handle test image selection
 testImageSelect.addEventListener("change", async (e) => {
