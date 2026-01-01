@@ -203,54 +203,24 @@ export class CrtSubpixelProcessor {
       alphaMode: "premultiplied",
     });
 
-    // Update input dimensions uniform
-    this.inputDimensionsBuffer.write(d.vec2u(input.width, input.height));
-
-    // Calculate output dimensions (3x expansion adjusted for pixel density)
-    const logicalWidth = input.width / this.currentPixelDensity;
-    const logicalHeight = input.height / this.currentPixelDensity;
-    const outputWidth = Math.floor(logicalWidth * 3);
-    const outputHeight = Math.floor(logicalHeight * 3);
-
     // Set canvas size (3x input for full detail)
     const canvasWidth = Math.floor(input.width * 3);
     const canvasHeight = Math.floor(input.height * 3);
     canvas.width = canvasWidth;
     canvas.height = canvasHeight;
 
-    // Update output dimensions uniform
-    this.outputDimensionsBuffer.write(d.vec2u(outputWidth, outputHeight));
-
-    // Convert ImageBitmap to VideoFrame for use with external texture
-    const videoFrame = new VideoFrame(input, { timestamp: 0 });
-
-    // Create bind group with external texture from VideoFrame
-    const gpuExternalTexture = this.root.createBindGroup(bindGroupLayout, {
-      externalTexture: this.root.device.importExternalTexture({
-        source: videoFrame,
-      }),
-    });
-
-    // Render directly to canvas using the unified pipeline
-    this.pipeline
-      .with(gpuExternalTexture)
-      .withColorAttachment({
-        view: context.getCurrentTexture().createView(),
-        loadOp: "clear",
-        clearValue: { r: 0, g: 0, b: 0, a: 1 },
-        storeOp: "store",
-      })
-      .draw(3);
-
-    // Wait for GPU to finish
-    await this.root.device.queue.onSubmittedWorkDone();
-
-    // Clean up VideoFrame
-    videoFrame.close();
+    // Render the image using shared method
+    await this.renderImageToCanvas(input);
 
     // Update canvas aspect ratio
     const aspectRatio = input.width / input.height;
     canvas.style.aspectRatio = `${aspectRatio}`;
+
+    // Calculate output dimensions for logging
+    const logicalWidth = input.width / this.currentPixelDensity;
+    const logicalHeight = input.height / this.currentPixelDensity;
+    const outputWidth = Math.floor(logicalWidth * 3);
+    const outputHeight = Math.floor(logicalHeight * 3);
 
     console.log(
       `Image rendered: ${canvasWidth}x${canvasHeight}, logical pixels ${outputWidth}x${outputHeight}`,
@@ -350,17 +320,16 @@ export class CrtSubpixelProcessor {
   }
 
   /**
-   * Export the current canvas frame as an image blob
+   * Export the current camera frame as an image blob
    *
-   * Works in both image and camera modes:
-   * - In image mode: re-renders the image to capture it (WebGPU clears canvas after present)
-   * - In camera mode: captures after the next render
+   * Only works in camera mode - captures after the next render.
+   * For image mode, use exportImage() instead.
    *
    * @param type Image MIME type (e.g., 'image/png', 'image/jpeg')
    * @param quality For lossy formats like JPEG, quality from 0 to 1
-   * @returns Promise resolving to the image Blob, or null if no canvas is active
+   * @returns Promise resolving to the image Blob, or null if camera is not running
    */
-  async exportFrame(
+  async exportCameraFrame(
     type: string = "image/png",
     quality?: number,
   ): Promise<Blob | null> {
@@ -369,32 +338,29 @@ export class CrtSubpixelProcessor {
       return null;
     }
 
-    // In camera mode, wait for next frame render
-    if (this.isCameraRunning()) {
-      return new Promise((resolve) => {
-        this.pendingExport = { resolve, type, quality };
-      });
-    }
-
-    // In image mode, re-render and capture
-    // WebGPU clears the canvas after present, so we need to re-render to capture
-    if (!this.currentImageBitmap) {
-      console.warn("No image to export");
+    if (!this.isCameraRunning()) {
+      console.warn(
+        "Camera is not running, use exportImage() for static images",
+      );
       return null;
     }
 
-    return this.exportImage(type, quality);
+    return new Promise((resolve) => {
+      this.pendingExport = { resolve, type, quality };
+    });
   }
 
   /**
-   * Export the current image by re-running the render pipeline and capturing the result
+   * Export an image by re-running the render pipeline and capturing the result
    * This is needed because WebGPU clears the canvas after each frame is presented
    *
+   * @param input The ImageBitmap to render and export
    * @param type Image MIME type (e.g., 'image/png', 'image/jpeg')
    * @param quality For lossy formats like JPEG, quality from 0 to 1
    * @returns Promise resolving to the image Blob, or null if export fails
    */
-  private async exportImage(
+  async exportImage(
+    input: ImageBitmap,
     type: string = "image/png",
     quality?: number,
   ): Promise<Blob | null> {
@@ -406,14 +372,76 @@ export class CrtSubpixelProcessor {
       !this.inputDimensionsBuffer ||
       !this.presentationFormat ||
       !this.currentCanvas ||
-      !this.currentContext ||
-      !this.currentImageBitmap
+      !this.currentContext
     ) {
-      console.warn("Cannot export: processor not ready or no image loaded");
+      console.warn(
+        "Cannot export: processor not ready or no canvas configured",
+      );
       return null;
     }
 
-    const input = this.currentImageBitmap;
+    // Update input dimensions uniform
+    this.inputDimensionsBuffer.write(d.vec2u(input.width, input.height));
+
+    // Calculate output dimensions (3x expansion adjusted for pixel density)
+    const logicalWidth = input.width / this.currentPixelDensity;
+    const logicalHeight = input.height / this.currentPixelDensity;
+    const outputWidth = Math.floor(logicalWidth * 3);
+    const outputHeight = Math.floor(logicalHeight * 3);
+
+    // Update output dimensions uniform
+    this.outputDimensionsBuffer.write(d.vec2u(outputWidth, outputHeight));
+
+    // Convert ImageBitmap to VideoFrame for use with external texture
+    const videoFrame = new VideoFrame(input, { timestamp: 0 });
+
+    // Create bind group with external texture from VideoFrame
+    const gpuExternalTexture = this.root.createBindGroup(bindGroupLayout, {
+      externalTexture: this.root.device.importExternalTexture({
+        source: videoFrame,
+      }),
+    });
+
+    // Render directly to canvas
+    this.pipeline
+      .with(gpuExternalTexture)
+      .withColorAttachment({
+        view: this.currentContext.getCurrentTexture().createView(),
+        loadOp: "clear",
+        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        storeOp: "store",
+      })
+      .draw(3);
+
+    // CRITICAL: Call toBlob synchronously right after draw, before any await
+    // This ensures the canvas content is captured before the frame is presented
+    // and before any async gap that could invalidate the back buffer
+    const blobPromise = new Promise<Blob | null>((resolve) => {
+      this.currentCanvas!.toBlob((blob) => resolve(blob), type, quality);
+    });
+
+    // Now wait for GPU completion and clean up
+    await this.root.device.queue.onSubmittedWorkDone();
+    videoFrame.close();
+
+    return blobPromise;
+  }
+
+  /**
+   * Internal method to render an image to the current canvas
+   * Shared between renderImage and exportImage to avoid code duplication
+   */
+  private async renderImageToCanvas(input: ImageBitmap): Promise<void> {
+    if (
+      !this.root ||
+      !this.pipeline ||
+      !this.outputDimensionsBuffer ||
+      !this.inputDimensionsBuffer ||
+      !this.currentCanvas ||
+      !this.currentContext
+    ) {
+      throw new Error("Processor not ready for rendering");
+    }
 
     // Update input dimensions uniform
     this.inputDimensionsBuffer.write(d.vec2u(input.width, input.height));
@@ -453,11 +481,6 @@ export class CrtSubpixelProcessor {
 
     // Clean up VideoFrame
     videoFrame.close();
-
-    // Now capture the canvas content before it gets cleared
-    return new Promise((resolve) => {
-      this.currentCanvas!.toBlob((blob) => resolve(blob), type, quality);
-    });
   }
 
   /**

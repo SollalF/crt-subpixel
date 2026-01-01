@@ -210,7 +210,7 @@ exportButton.addEventListener("click", async () => {
 
   try {
     setStatus("Exporting frame...", "info");
-    const blob = await processor.exportFrame("image/png");
+    const blob = await processor.exportCameraFrame("image/png");
 
     if (!blob) {
       setStatus("Failed to export frame", "error");
@@ -313,7 +313,7 @@ fileInput.addEventListener("change", async (e) => {
   }
 });
 
-// Download canvas image (unified export for both modes)
+// Download canvas image
 async function downloadImage() {
   if (!processor) {
     setStatus("No image to download", "error");
@@ -323,25 +323,29 @@ async function downloadImage() {
   try {
     setStatus("Exporting image...", "info");
 
-    // Use unified exportFrame (works for both image and camera modes)
-    const blob = await processor.exportFrame("image/png");
+    // For image mode, use exportImage with the current bitmap
+    if (currentMode === "image" && currentImageBitmap) {
+      const blob = await processor.exportImage(currentImageBitmap, "image/png");
 
-    if (!blob) {
-      setStatus("Failed to export image", "error");
-      return;
+      if (!blob) {
+        setStatus("Failed to export image", "error");
+        return;
+      }
+
+      // Create download link
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `crt-subpixel-${Date.now()}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setStatus("Image downloaded!", "success");
+    } else {
+      setStatus("No image to download", "error");
     }
-
-    // Create download link
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `crt-subpixel-${Date.now()}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    setStatus("Image downloaded!", "success");
   } catch (error) {
     setStatus(
       `Failed to download image: ${error instanceof Error ? error.message : String(error)}`,
