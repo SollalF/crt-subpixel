@@ -10,6 +10,7 @@
  * Browser Support: Chrome/Edge desktop (requires secure context)
  */
 import type { CameraOptions, Orientation } from "./core/types.js";
+import type { ISettingsManager } from "./core/repositories/index.js";
 import { GpuContext } from "./infrastructure/GpuContext.js";
 import { RenderPipeline } from "./infrastructure/RenderPipeline.js";
 import { CanvasManager } from "./infrastructure/CanvasManager.js";
@@ -47,7 +48,7 @@ export class CrtSubpixelProcessor {
   private pipeline: RenderPipeline;
   private canvasManager: CanvasManager;
   private cameraManager: CameraManager;
-  private settingsManager: SettingsManager;
+  private settingsManager: ISettingsManager;
 
   // Use cases
   private imageProcessor: ImageProcessor | null = null;
