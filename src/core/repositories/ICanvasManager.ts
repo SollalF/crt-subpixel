@@ -1,8 +1,8 @@
 /**
- * Canvas Manager Port (Interface)
+ * Canvas Manager Repository Interface
  * Defines the contract for canvas operations required by use cases
  */
-import type { Dimensions } from "../../core/types.js";
+import { Dimensions } from "../value-objects/Dimensions.js";
 import type { IGpuContext } from "./IGpuContext.js";
 
 /**

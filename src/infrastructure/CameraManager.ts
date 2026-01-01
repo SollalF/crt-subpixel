@@ -2,12 +2,9 @@
  * Camera Manager
  * Handles camera stream lifecycle and video element management
  */
-import {
-  type CameraOptions,
-  DEFAULT_CAMERA_OPTIONS,
-  type Dimensions,
-} from "../core/types.js";
-import type { ICameraManager } from "../use-cases/ports/ICameraManager.js";
+import { type CameraOptions, DEFAULT_CAMERA_OPTIONS } from "../core/types.js";
+import { Dimensions } from "../core/value-objects/Dimensions.js";
+import type { ICameraManager } from "../core/repositories/ICameraManager.js";
 
 /**
  * Camera stream information
@@ -127,10 +124,10 @@ export class CameraManager implements ICameraManager {
       return null;
     }
 
-    return {
-      width: this.cameraStream.video.videoWidth,
-      height: this.cameraStream.video.videoHeight,
-    };
+    return new Dimensions(
+      this.cameraStream.video.videoWidth,
+      this.cameraStream.video.videoHeight,
+    );
   }
 
   /**

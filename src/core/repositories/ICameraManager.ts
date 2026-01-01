@@ -1,8 +1,9 @@
 /**
- * Camera Manager Port (Interface)
+ * Camera Manager Repository Interface
  * Defines the contract for camera operations required by use cases
  */
-import type { CameraOptions, Dimensions } from "../../core/types.js";
+import type { CameraOptions } from "../types.js";
+import { Dimensions } from "../value-objects/Dimensions.js";
 
 /**
  * Interface for camera management operations

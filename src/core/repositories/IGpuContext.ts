@@ -1,11 +1,11 @@
 /**
- * GPU Context Port (Interface)
+ * GPU Context Repository Interface
  * Defines the contract for GPU operations required by use cases
  */
 import type { TgpuRoot, TgpuUniform } from "typegpu";
 import * as d from "typegpu/data";
 
-import type { Dimensions } from "../../core/types.js";
+import { Dimensions } from "../value-objects/Dimensions.js";
 
 /**
  * Interface for GPU context operations

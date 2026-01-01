@@ -7,8 +7,8 @@ import {
   type ProcessorSettings,
   DEFAULT_SETTINGS,
 } from "../core/types.js";
-import type { ISettingsManager } from "../use-cases/ports/ISettingsManager.js";
-import type { IGpuContext } from "../use-cases/ports/IGpuContext.js";
+import type { ISettingsManager } from "../core/repositories/ISettingsManager.js";
+import type { IGpuContext } from "../core/repositories/IGpuContext.js";
 
 /**
  * Manages processor settings and syncs them to GPU buffers

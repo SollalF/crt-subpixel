@@ -17,7 +17,9 @@ export { CrtSubpixelProcessor } from "./CrtSubpixelProcessor.js";
 export type {
   Orientation,
   ProcessorSettings,
-  Dimensions,
   ExportOptions,
   CameraOptions,
 } from "./core/types.js";
+
+// Value objects
+export { Dimensions } from "./core/value-objects/index.js";

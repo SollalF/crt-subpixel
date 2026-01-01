@@ -2,9 +2,9 @@
  * Canvas Manager
  * Handles WebGPU canvas context configuration and sizing
  */
-import type { Dimensions } from "../core/types.js";
-import type { ICanvasManager } from "../use-cases/ports/ICanvasManager.js";
-import type { IGpuContext } from "../use-cases/ports/IGpuContext.js";
+import { Dimensions } from "../core/value-objects/Dimensions.js";
+import type { ICanvasManager } from "../core/repositories/ICanvasManager.js";
+import type { IGpuContext } from "../core/repositories/IGpuContext.js";
 
 /**
  * Manages canvas configuration and WebGPU context
@@ -74,7 +74,7 @@ export class CanvasManager implements ICanvasManager {
     this.canvas.width = canvasWidth;
     this.canvas.height = canvasHeight;
 
-    return { width: canvasWidth, height: canvasHeight };
+    return new Dimensions(canvasWidth, canvasHeight);
   }
 
   /**

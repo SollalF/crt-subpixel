@@ -1,5 +1,5 @@
 /**
- * Render Pipeline Port (Interface)
+ * Render Pipeline Repository Interface
  * Defines the contract for rendering operations required by use cases
  */
 import type { IGpuContext } from "./IGpuContext.js";

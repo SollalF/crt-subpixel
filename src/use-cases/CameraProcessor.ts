@@ -2,16 +2,16 @@
  * Camera Processor Use Case
  * Orchestrates real-time camera processing with CRT subpixel effect
  */
+import type { CameraOptions, ExportOptions } from "../core/types.js";
 import type {
-  CameraOptions,
-  Dimensions,
-  ExportOptions,
-} from "../core/types.js";
-import type { IGpuContext } from "./ports/IGpuContext.js";
-import type { IRenderPipeline } from "./ports/IRenderPipeline.js";
-import type { ICanvasManager } from "./ports/ICanvasManager.js";
-import type { ICameraManager } from "./ports/ICameraManager.js";
-import type { ISettingsManager } from "./ports/ISettingsManager.js";
+  IGpuContext,
+  IRenderPipeline,
+  ICanvasManager,
+  ICameraManager,
+  ISettingsManager,
+} from "../core/repositories/index.js";
+import { Dimensions, PixelDensity } from "../core/value-objects/index.js";
+import { SubpixelRenderer } from "../core/services/index.js";
 
 /**
  * Pending export request state
@@ -29,6 +29,7 @@ export class CameraProcessor {
   private videoFrameCallbackId: number | undefined;
   private lastFrameSize: Dimensions | null = null;
   private pendingExport: PendingExport | null = null;
+  private readonly subpixelRenderer: SubpixelRenderer;
 
   constructor(
     private gpuContext: IGpuContext,
@@ -36,7 +37,9 @@ export class CameraProcessor {
     private canvasManager: ICanvasManager,
     private cameraManager: ICameraManager,
     private settingsManager: ISettingsManager,
-  ) {}
+  ) {
+    this.subpixelRenderer = new SubpixelRenderer();
+  }
 
   /**
    * Check if camera processing is active
@@ -46,40 +49,27 @@ export class CameraProcessor {
   }
 
   /**
-   * Calculate output dimensions based on input and pixel density
-   */
-  private calculateOutputDimensions(input: Dimensions): Dimensions {
-    const density = this.settingsManager.pixelDensity;
-    const logicalWidth = input.width / density;
-    const logicalHeight = input.height / density;
-
-    return {
-      width: Math.floor(logicalWidth * 3),
-      height: Math.floor(logicalHeight * 3),
-    };
-  }
-
-  /**
    * Update canvas size for new frame dimensions
    */
   private updateCanvasSize(frameWidth: number, frameHeight: number): void {
-    // Set canvas size (3x input)
-    this.canvasManager.setSize({ width: frameWidth, height: frameHeight });
+    // Create domain objects
+    const inputDimensions = new Dimensions(frameWidth, frameHeight);
+    const pixelDensity = PixelDensity.from(this.settingsManager.pixelDensity);
 
-    // Calculate output dimensions
-    const outputDimensions = this.calculateOutputDimensions({
-      width: frameWidth,
-      height: frameHeight,
-    });
+    // Set canvas size (3x input)
+    this.canvasManager.setSize(inputDimensions);
+
+    // Calculate output dimensions using domain service
+    const outputDimensions = this.subpixelRenderer.calculateOutputDimensions(
+      inputDimensions,
+      pixelDensity,
+    );
 
     // Update GPU dimensions
     this.gpuContext.writeOutputDimensions(outputDimensions);
 
     // Update aspect ratio
-    this.canvasManager.setAspectRatio({
-      width: frameWidth,
-      height: frameHeight,
-    });
+    this.canvasManager.setAspectRatio(inputDimensions);
 
     const canvas = this.canvasManager.currentCanvas;
     console.log(
@@ -113,19 +103,15 @@ export class CameraProcessor {
     const frameWidth = metadata.width;
     const frameHeight = metadata.height;
 
+    // Create domain object for input dimensions
+    const inputDimensions = new Dimensions(frameWidth, frameHeight);
+
     // Update input dimensions
-    this.gpuContext.writeInputDimensions({
-      width: frameWidth,
-      height: frameHeight,
-    });
+    this.gpuContext.writeInputDimensions(inputDimensions);
 
     // Update canvas if frame size changed
-    if (
-      !this.lastFrameSize ||
-      this.lastFrameSize.width !== frameWidth ||
-      this.lastFrameSize.height !== frameHeight
-    ) {
-      this.lastFrameSize = { width: frameWidth, height: frameHeight };
+    if (!this.lastFrameSize || !this.lastFrameSize.equals(inputDimensions)) {
+      this.lastFrameSize = inputDimensions;
       this.updateCanvasSize(frameWidth, frameHeight);
     }
 

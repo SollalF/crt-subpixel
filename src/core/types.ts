@@ -1,15 +1,17 @@
 /**
  * Core types for CRT Subpixel Processor
+ * DTOs and configuration types (not domain objects)
  * This file has no dependencies on other src modules to prevent circular imports
  */
 
 /**
- * RGB stripe orientation mode
+ * RGB stripe orientation mode (for DTOs)
+ * Use Orientation value object from core/value-objects/ for domain logic
  */
 export type Orientation = "columns" | "rows";
 
 /**
- * Processor settings that can be modified at runtime
+ * Processor settings that can be modified at runtime (DTO)
  */
 export interface ProcessorSettings {
   /** RGB stripe orientation ('columns' for vertical, 'rows' for horizontal) */
@@ -25,14 +27,6 @@ export const DEFAULT_SETTINGS: ProcessorSettings = {
   orientation: "columns",
   pixelDensity: 1,
 };
-
-/**
- * Dimensions of an image or canvas
- */
-export interface Dimensions {
-  width: number;
-  height: number;
-}
 
 /**
  * Export options for saving rendered frames

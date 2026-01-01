@@ -1,8 +1,8 @@
 /**
- * Settings Manager Port (Interface)
+ * Settings Manager Repository Interface
  * Defines the contract for settings operations required by use cases
  */
-import type { Orientation, ProcessorSettings } from "../../core/types.js";
+import type { Orientation, ProcessorSettings } from "../types.js";
 import type { IGpuContext } from "./IGpuContext.js";
 
 /**

@@ -2,35 +2,29 @@
  * Image Processor Use Case
  * Orchestrates image rendering and export with CRT subpixel effect
  */
-import type { Dimensions, ExportOptions } from "../core/types.js";
-import type { IGpuContext } from "./ports/IGpuContext.js";
-import type { IRenderPipeline } from "./ports/IRenderPipeline.js";
-import type { ICanvasManager } from "./ports/ICanvasManager.js";
-import type { ISettingsManager } from "./ports/ISettingsManager.js";
+import type { ExportOptions } from "../core/types.js";
+import type {
+  IGpuContext,
+  IRenderPipeline,
+  ICanvasManager,
+  ISettingsManager,
+} from "../core/repositories/index.js";
+import { Dimensions, PixelDensity } from "../core/value-objects/index.js";
+import { SubpixelRenderer } from "../core/services/index.js";
 
 /**
  * Handles image processing operations
  */
 export class ImageProcessor {
+  private readonly subpixelRenderer: SubpixelRenderer;
+
   constructor(
     private gpuContext: IGpuContext,
     private pipeline: IRenderPipeline,
     private canvasManager: ICanvasManager,
     private settingsManager: ISettingsManager,
-  ) {}
-
-  /**
-   * Calculate output dimensions based on input and pixel density
-   */
-  private calculateOutputDimensions(input: Dimensions): Dimensions {
-    const density = this.settingsManager.pixelDensity;
-    const logicalWidth = input.width / density;
-    const logicalHeight = input.height / density;
-
-    return {
-      width: Math.floor(logicalWidth * 3),
-      height: Math.floor(logicalHeight * 3),
-    };
+  ) {
+    this.subpixelRenderer = new SubpixelRenderer();
   }
 
   /**
@@ -46,20 +40,21 @@ export class ImageProcessor {
     // Configure canvas
     this.canvasManager.configure(canvas, this.gpuContext);
 
+    // Create domain objects
+    const inputDimensions = new Dimensions(input.width, input.height);
+    const pixelDensity = PixelDensity.from(this.settingsManager.pixelDensity);
+
     // Set canvas size (3x input for full detail)
-    this.canvasManager.setSize({ width: input.width, height: input.height });
+    this.canvasManager.setSize(inputDimensions);
 
     // Update input dimensions
-    this.gpuContext.writeInputDimensions({
-      width: input.width,
-      height: input.height,
-    });
+    this.gpuContext.writeInputDimensions(inputDimensions);
 
-    // Calculate and update output dimensions
-    const outputDimensions = this.calculateOutputDimensions({
-      width: input.width,
-      height: input.height,
-    });
+    // Calculate and update output dimensions using domain service
+    const outputDimensions = this.subpixelRenderer.calculateOutputDimensions(
+      inputDimensions,
+      pixelDensity,
+    );
     this.gpuContext.writeOutputDimensions(outputDimensions);
 
     // Convert ImageBitmap to VideoFrame for external texture
@@ -76,10 +71,7 @@ export class ImageProcessor {
       await this.gpuContext.flush();
 
       // Update aspect ratio
-      this.canvasManager.setAspectRatio({
-        width: input.width,
-        height: input.height,
-      });
+      this.canvasManager.setAspectRatio(inputDimensions);
 
       const canvasSize = this.canvasManager.currentCanvas;
       console.log(
@@ -115,16 +107,18 @@ export class ImageProcessor {
     const type = options.type ?? "image/png";
     const quality = options.quality;
 
-    // Update dimensions
-    this.gpuContext.writeInputDimensions({
-      width: input.width,
-      height: input.height,
-    });
+    // Create domain objects
+    const inputDimensions = new Dimensions(input.width, input.height);
+    const pixelDensity = PixelDensity.from(this.settingsManager.pixelDensity);
 
-    const outputDimensions = this.calculateOutputDimensions({
-      width: input.width,
-      height: input.height,
-    });
+    // Update dimensions
+    this.gpuContext.writeInputDimensions(inputDimensions);
+
+    // Calculate output dimensions using domain service
+    const outputDimensions = this.subpixelRenderer.calculateOutputDimensions(
+      inputDimensions,
+      pixelDensity,
+    );
     this.gpuContext.writeOutputDimensions(outputDimensions);
 
     // Convert to VideoFrame

@@ -5,8 +5,8 @@
 import tgpu, { type TgpuRoot, type TgpuUniform } from "typegpu";
 import * as d from "typegpu/data";
 
-import type { Dimensions } from "../core/types.js";
-import type { IGpuContext } from "../use-cases/ports/IGpuContext.js";
+import { Dimensions } from "../core/value-objects/Dimensions.js";
+import type { IGpuContext } from "../core/repositories/IGpuContext.js";
 
 /**
  * Manages WebGPU resources including device, buffers, and samplers
