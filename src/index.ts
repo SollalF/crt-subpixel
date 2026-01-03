@@ -24,3 +24,6 @@ export type {
 
 // Value objects
 export { Dimensions } from "./core/value-objects/index.js";
+
+// Domain services
+export { SubpixelRenderer } from "./core/services/index.js";

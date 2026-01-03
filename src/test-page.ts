@@ -1,4 +1,4 @@
-import { CrtSubpixelProcessor } from "./index.js";
+import { CrtSubpixelProcessor, SubpixelRenderer, Dimensions } from "./index.js";
 
 // Test images available in the test-images folder
 const TEST_IMAGES = [
@@ -28,6 +28,12 @@ const TEST_IMAGES = [
 // Single unified processor for both images and camera
 let processor: CrtSubpixelProcessor | null = null;
 let currentImageBitmap: ImageBitmap | null = null;
+
+// Domain service for pixel density calculations
+const subpixelRenderer = new SubpixelRenderer();
+
+// Track if we've set pixel density for camera mode
+let cameraPixelDensitySet = false;
 
 // Mode tracking
 type Mode = "image" | "camera";
@@ -127,6 +133,9 @@ function switchToImageMode() {
   // Stop field display polling
   stopFieldDisplayPolling();
 
+  // Reset camera pixel density flag
+  cameraPixelDensitySet = false;
+
   currentMode = "image";
   cameraButton.textContent = "Start Camera";
   cameraButton.classList.remove("active");
@@ -158,10 +167,8 @@ async function toggleCameraMode() {
       "Camera running. CRT subpixel effect applied in real-time.",
       "success",
     );
-    // Start polling field display for camera mode
-    if (interlacedCheckbox.checked) {
-      startFieldDisplayPolling();
-    }
+    // Start polling for field display and pixel density updates in camera mode
+    startFieldDisplayPolling();
   } catch (error) {
     setStatus(
       `Failed to start camera: ${error instanceof Error ? error.message : String(error)}`,
@@ -191,14 +198,23 @@ async function processAndRender(imageBitmap: ImageBitmap, saveImage = true) {
     // Disable download button while processing
     downloadButton.disabled = true;
 
-    // Render image directly to canvas (unified flow)
-    // This will automatically set pixel density for 480p output
-    await proc.renderImage(canvas, imageBitmap);
+    // Automatically set pixel density to achieve 480p output by default
+    const inputDimensions = new Dimensions(
+      imageBitmap.width,
+      imageBitmap.height,
+    );
+    const targetDensity = subpixelRenderer.calculatePixelDensityForTargetHeight(
+      inputDimensions,
+      480, // 480p target
+    );
+    proc.setPixelDensity(targetDensity);
 
     // Update UI to reflect the calculated pixel density
-    const currentDensity = proc.getPixelDensity();
-    densitySlider.value = String(currentDensity);
-    densityValue.textContent = String(currentDensity);
+    densitySlider.value = String(targetDensity);
+    densityValue.textContent = String(targetDensity);
+
+    // Render image directly to canvas (unified flow)
+    await proc.renderImage(canvas, imageBitmap);
 
     // Enable download button
     downloadButton.disabled = false;
@@ -323,23 +339,61 @@ fieldSelect.addEventListener("change", async (e) => {
 
 // Update field display for camera mode (show current field, even though it auto-alternates)
 function updateFieldDisplay() {
-  if (processor && interlacedCheckbox.checked) {
-    const currentField = processor.getField();
-    fieldSelect.value = currentField;
+  if (processor) {
+    if (interlacedCheckbox.checked) {
+      const currentField = processor.getField();
+      fieldSelect.value = currentField;
+    }
+
+    // For camera mode: automatically set pixel density for 480p when canvas dimensions are available
+    if (
+      currentMode === "camera" &&
+      !cameraPixelDensitySet &&
+      canvas.width > 0 &&
+      canvas.height > 0
+    ) {
+      // Estimate input dimensions from output dimensions and current pixel density
+      // outputHeight = floor((inputHeight / density) * 3)
+      // So: inputHeight ≈ (outputHeight / 3) * density
+      const currentDensity = processor.getPixelDensity();
+      const estimatedInputHeight = (canvas.height / 3) * currentDensity;
+      const estimatedInputWidth = (canvas.width / 3) * currentDensity;
+
+      // Calculate optimal pixel density for 480p
+      const inputDimensions = new Dimensions(
+        estimatedInputWidth,
+        estimatedInputHeight,
+      );
+      const targetDensity =
+        subpixelRenderer.calculatePixelDensityForTargetHeight(
+          inputDimensions,
+          480, // 480p target
+        );
+
+      processor.setPixelDensity(targetDensity);
+      cameraPixelDensitySet = true;
+    }
+
+    // Update pixel density slider to reflect current value (may have been auto-calculated)
+    const currentDensity = processor.getPixelDensity();
+    if (parseInt(densitySlider.value, 10) !== currentDensity) {
+      densitySlider.value = String(currentDensity);
+      densityValue.textContent = String(currentDensity);
+    }
   }
 }
 
-// Poll field display for camera mode to show auto-alternation
+// Poll field display for camera mode to show auto-alternation and pixel density updates
 let fieldDisplayInterval: number | null = null;
 function startFieldDisplayPolling() {
   if (fieldDisplayInterval) {
     clearInterval(fieldDisplayInterval);
   }
   fieldDisplayInterval = window.setInterval(() => {
-    if (currentMode === "camera" && processor && interlacedCheckbox.checked) {
+    if (currentMode === "camera" && processor) {
       updateFieldDisplay();
     }
-  }, 100); // Update every 100ms to show field alternation
+  }, 100); // Update every 100ms to show field alternation and pixel density changes
 }
 
 function stopFieldDisplayPolling() {

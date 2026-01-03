@@ -25,8 +25,6 @@ import { CameraManager } from "../infrastructure/CameraManager.js";
 import { SettingsManager } from "../infrastructure/SettingsManager.js";
 import { ImageProcessor } from "../use-cases/ImageProcessor.js";
 import { CameraProcessor } from "../use-cases/CameraProcessor.js";
-import { Dimensions } from "../core/value-objects/Dimensions.js";
-import { SubpixelRenderer } from "../core/services/SubpixelRenderer.js";
 
 /**
  * Main processor class for CRT subpixel expansion
@@ -66,9 +64,6 @@ export class CrtSubpixelProcessor {
   // Track current image for re-rendering
   private currentImageBitmap: ImageBitmap | null = null;
 
-  // Domain service for pixel density calculations
-  private readonly subpixelRenderer: SubpixelRenderer;
-
   constructor(
     gpuContext?: IGpuContext,
     pipeline?: IRenderPipeline,
@@ -82,7 +77,6 @@ export class CrtSubpixelProcessor {
     this.canvasManager = canvasManager ?? new CanvasManager();
     this.cameraManager = cameraManager ?? new CameraManager();
     this.settingsManager = settingsManager ?? new SettingsManager();
-    this.subpixelRenderer = new SubpixelRenderer();
   }
 
   /**
@@ -160,15 +154,6 @@ export class CrtSubpixelProcessor {
 
     // Store for potential re-render (e.g., orientation change)
     this.currentImageBitmap = input;
-
-    // Automatically set pixel density to achieve 480p output by default
-    const inputDimensions = new Dimensions(input.width, input.height);
-    const targetDensity =
-      this.subpixelRenderer.calculatePixelDensityForTargetHeight(
-        inputDimensions,
-        480, // 480p target
-      );
-    this.setPixelDensity(targetDensity);
 
     await this.imageProcessor.render(canvas, input);
   }
