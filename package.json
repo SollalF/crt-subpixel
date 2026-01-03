@@ -40,7 +40,8 @@
   },
   "packageManager": "pnpm@10.5.2",
   "peerDependencies": {
-    "@webgpu/types": ">=0.1.0"
+    "@webgpu/types": ">=0.1.0",
+    "unplugin-typegpu": "^0.8.0"
   },
   "peerDependenciesMeta": {
     "@webgpu/types": {

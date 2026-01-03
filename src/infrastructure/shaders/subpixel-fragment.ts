@@ -40,6 +40,7 @@ export function createSubpixelFragment(
     in: { uv: d.vec2f },
     out: d.vec4f,
   })((input) => {
+    "use gpu";
     // Get output pixel coordinate from UV and output dimensions
     const outputDims = outputDimensions.$;
     const pixelCoord = input.uv.mul(d.vec2f(outputDims.x, outputDims.y));
