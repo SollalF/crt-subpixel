@@ -1,22 +1,52 @@
 {
   "name": "crt-subpixel",
   "version": "1.0.0",
-  "description": "A TypeScript project",
+  "description": "WebGPU-based library for CRT-style subpixel image processing",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
   "scripts": {
-    "prepare": "pnpm run build && husky install",
     "build": "tsc",
+    "prepublishOnly": "pnpm build",
+    "prepare": "husky install && pnpm build",
     "lint": "eslint .",
     "format": "prettier --write .",
     "dev": "vite",
     "serve": "vite preview"
   },
-  "keywords": [],
-  "author": "Your Name",
+  "keywords": [
+    "webgpu",
+    "crt",
+    "subpixel",
+    "image-processing",
+    "shader"
+  ],
+  "author": "Sollal Fouilland",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SollalF/crt-subpixel"
+  },
   "packageManager": "pnpm@10.5.2",
+  "peerDependencies": {
+    "@webgpu/types": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@webgpu/types": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@commitlint/cli": "^20.2.0",
     "@commitlint/config-conventional": "^20.2.0",

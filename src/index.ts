@@ -13,7 +13,7 @@
 // Main processor facade
 export { CrtSubpixelProcessor } from "./presentation/CrtSubpixelProcessor.js";
 
-// Core types
+// Core types - all DTOs and options
 export type {
   Orientation,
   ProcessorSettings,
@@ -22,8 +22,18 @@ export type {
   InterlaceField,
 } from "./core/types.js";
 
+// Port interfaces - for advanced users who want to mock/extend
+export type {
+  IGpuContext,
+  IRenderPipeline,
+  ICanvasManager,
+  ICameraManager,
+  ISettingsManager,
+} from "./core/ports/index.js";
+
 // Value objects
 export { Dimensions } from "./core/value-objects/index.js";
+export { Orientation as OrientationVO } from "./core/value-objects/Orientation.js";
 
 // Domain services
 export { SubpixelRenderer } from "./core/services/index.js";
