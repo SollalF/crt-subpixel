@@ -123,6 +123,20 @@
       .image-controls.hidden {
         display: none;
       }
+
+      input[type="checkbox"] {
+        margin-right: 8px;
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+        accent-color: #4a8a4a;
+      }
+
+      label[for="interlaced-checkbox"] {
+        display: flex;
+        align-items: center;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -151,6 +165,21 @@
         <div class="control-group">
           <label for="density-slider">Pixel Density: <span id="density-value">1</span></label>
           <input type="range" id="density-slider" min="1" max="248" value="1" />
+        </div>
+
+        <div class="control-group">
+          <label for="interlaced-checkbox">
+            <input type="checkbox" id="interlaced-checkbox" />
+            Interlaced Rendering
+          </label>
+        </div>
+
+        <div class="control-group" id="field-control" style="display: none;">
+          <label for="field-select">Field:</label>
+          <select id="field-select">
+            <option value="odd">Odd</option>
+            <option value="even">Even</option>
+          </select>
         </div>
 
         <div class="image-controls" id="image-controls">

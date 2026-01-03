@@ -64,6 +64,13 @@ const exportButton = document.getElementById(
 const exportControl = document.getElementById(
   "export-control",
 ) as HTMLDivElement;
+const interlacedCheckbox = document.getElementById(
+  "interlaced-checkbox",
+) as HTMLInputElement;
+const fieldSelect = document.getElementById(
+  "field-select",
+) as HTMLSelectElement;
+const fieldControl = document.getElementById("field-control") as HTMLDivElement;
 
 // Populate test images dropdown
 TEST_IMAGES.forEach((imageName) => {
@@ -117,6 +124,9 @@ function switchToImageMode() {
     processor.stopCamera();
   }
 
+  // Stop field display polling
+  stopFieldDisplayPolling();
+
   currentMode = "image";
   cameraButton.textContent = "Start Camera";
   cameraButton.classList.remove("active");
@@ -148,6 +158,10 @@ async function toggleCameraMode() {
       "Camera running. CRT subpixel effect applied in real-time.",
       "success",
     );
+    // Start polling field display for camera mode
+    if (interlacedCheckbox.checked) {
+      startFieldDisplayPolling();
+    }
   } catch (error) {
     setStatus(
       `Failed to start camera: ${error instanceof Error ? error.message : String(error)}`,
@@ -178,7 +192,13 @@ async function processAndRender(imageBitmap: ImageBitmap, saveImage = true) {
     downloadButton.disabled = true;
 
     // Render image directly to canvas (unified flow)
+    // This will automatically set pixel density for 480p output
     await proc.renderImage(canvas, imageBitmap);
+
+    // Update UI to reflect the calculated pixel density
+    const currentDensity = proc.getPixelDensity();
+    densitySlider.value = String(currentDensity);
+    densityValue.textContent = String(currentDensity);
 
     // Enable download button
     downloadButton.disabled = false;
@@ -268,6 +288,66 @@ densitySlider.addEventListener("input", async (e) => {
     // For camera mode, the change takes effect on the next frame automatically
   }
 });
+
+// Handle interlaced checkbox change
+interlacedCheckbox.addEventListener("change", async (e) => {
+  const enabled = (e.target as HTMLInputElement).checked;
+  fieldControl.style.display = enabled ? "flex" : "none";
+
+  if (processor) {
+    processor.setInterlaced(enabled);
+
+    // For image mode, reprocess the current image with new setting
+    if (currentMode === "image" && currentImageBitmap) {
+      await processAndRender(currentImageBitmap, false);
+    }
+    // For camera mode, the change takes effect on the next frame automatically
+  }
+});
+
+// Handle field selection change
+fieldSelect.addEventListener("change", async (e) => {
+  const field = (e.target as HTMLSelectElement).value as "odd" | "even";
+
+  if (processor) {
+    processor.setField(field);
+
+    // For image mode, reprocess the current image with new field
+    if (currentMode === "image" && currentImageBitmap) {
+      await processAndRender(currentImageBitmap, false);
+    }
+    // For camera mode, the change takes effect on the next frame automatically
+    // (though it will auto-alternate, so this sets the initial field)
+  }
+});
+
+// Update field display for camera mode (show current field, even though it auto-alternates)
+function updateFieldDisplay() {
+  if (processor && interlacedCheckbox.checked) {
+    const currentField = processor.getField();
+    fieldSelect.value = currentField;
+  }
+}
+
+// Poll field display for camera mode to show auto-alternation
+let fieldDisplayInterval: number | null = null;
+function startFieldDisplayPolling() {
+  if (fieldDisplayInterval) {
+    clearInterval(fieldDisplayInterval);
+  }
+  fieldDisplayInterval = window.setInterval(() => {
+    if (currentMode === "camera" && processor && interlacedCheckbox.checked) {
+      updateFieldDisplay();
+    }
+  }, 100); // Update every 100ms to show field alternation
+}
+
+function stopFieldDisplayPolling() {
+  if (fieldDisplayInterval) {
+    clearInterval(fieldDisplayInterval);
+    fieldDisplayInterval = null;
+  }
+}
 
 // Handle test image selection
 testImageSelect.addEventListener("change", async (e) => {
@@ -359,6 +439,7 @@ downloadButton.addEventListener("click", downloadImage);
 
 // Cleanup on page unload
 window.addEventListener("beforeunload", () => {
+  stopFieldDisplayPolling();
   if (processor) {
     processor.destroy();
   }

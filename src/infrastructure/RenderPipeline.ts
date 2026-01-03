@@ -9,8 +9,8 @@ import {
   createSubpixelFragment,
   bindGroupLayout,
 } from "./shaders/subpixel-fragment.js";
-import type { IRenderPipeline } from "../core/repositories/IRenderPipeline.js";
-import type { IGpuContext } from "../core/repositories/IGpuContext.js";
+import type { IRenderPipeline } from "../core/ports/IRenderPipeline.js";
+import type { IGpuContext } from "../core/ports/IGpuContext.js";
 
 /**
  * Manages the render pipeline for CRT subpixel effect
@@ -46,6 +46,8 @@ export class RenderPipeline implements IRenderPipeline {
       gpuContext.inputDimensionsBuffer,
       gpuContext.orientationBuffer,
       gpuContext.pixelDensityBuffer,
+      gpuContext.interlacedBuffer,
+      gpuContext.fieldBuffer,
     );
 
     this.pipeline = gpuContext.tgpuRoot["~unstable"]

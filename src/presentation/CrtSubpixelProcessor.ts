@@ -9,15 +9,24 @@
  *
  * Browser Support: Chrome/Edge desktop (requires secure context)
  */
-import type { CameraOptions, Orientation } from "./core/types.js";
-import type { ISettingsManager } from "./core/repositories/index.js";
-import { GpuContext } from "./infrastructure/GpuContext.js";
-import { RenderPipeline } from "./infrastructure/RenderPipeline.js";
-import { CanvasManager } from "./infrastructure/CanvasManager.js";
-import { CameraManager } from "./infrastructure/CameraManager.js";
-import { SettingsManager } from "./infrastructure/SettingsManager.js";
-import { ImageProcessor } from "./use-cases/ImageProcessor.js";
-import { CameraProcessor } from "./use-cases/CameraProcessor.js";
+import type { CameraOptions, Orientation } from "../core/types.js";
+import { Orientation as OrientationVO } from "../core/value-objects/Orientation.js";
+import type {
+  IGpuContext,
+  IRenderPipeline,
+  ICanvasManager,
+  ICameraManager,
+  ISettingsManager,
+} from "../core/ports/index.js";
+import { GpuContext } from "../infrastructure/GpuContext.js";
+import { RenderPipeline } from "../infrastructure/RenderPipeline.js";
+import { CanvasManager } from "../infrastructure/CanvasManager.js";
+import { CameraManager } from "../infrastructure/CameraManager.js";
+import { SettingsManager } from "../infrastructure/SettingsManager.js";
+import { ImageProcessor } from "../use-cases/ImageProcessor.js";
+import { CameraProcessor } from "../use-cases/CameraProcessor.js";
+import { Dimensions } from "../core/value-objects/Dimensions.js";
+import { SubpixelRenderer } from "../core/services/SubpixelRenderer.js";
 
 /**
  * Main processor class for CRT subpixel expansion
@@ -44,10 +53,10 @@ import { CameraProcessor } from "./use-cases/CameraProcessor.js";
  */
 export class CrtSubpixelProcessor {
   // Infrastructure components
-  private gpuContext: GpuContext;
-  private pipeline: RenderPipeline;
-  private canvasManager: CanvasManager;
-  private cameraManager: CameraManager;
+  private gpuContext: IGpuContext;
+  private pipeline: IRenderPipeline;
+  private canvasManager: ICanvasManager;
+  private cameraManager: ICameraManager;
   private settingsManager: ISettingsManager;
 
   // Use cases
@@ -57,13 +66,23 @@ export class CrtSubpixelProcessor {
   // Track current image for re-rendering
   private currentImageBitmap: ImageBitmap | null = null;
 
-  constructor() {
-    // Create infrastructure components
-    this.gpuContext = new GpuContext();
-    this.pipeline = new RenderPipeline();
-    this.canvasManager = new CanvasManager();
-    this.cameraManager = new CameraManager();
-    this.settingsManager = new SettingsManager();
+  // Domain service for pixel density calculations
+  private readonly subpixelRenderer: SubpixelRenderer;
+
+  constructor(
+    gpuContext?: IGpuContext,
+    pipeline?: IRenderPipeline,
+    canvasManager?: ICanvasManager,
+    cameraManager?: ICameraManager,
+    settingsManager?: ISettingsManager,
+  ) {
+    // Use provided dependencies or create default implementations
+    this.gpuContext = gpuContext ?? new GpuContext();
+    this.pipeline = pipeline ?? new RenderPipeline();
+    this.canvasManager = canvasManager ?? new CanvasManager();
+    this.cameraManager = cameraManager ?? new CameraManager();
+    this.settingsManager = settingsManager ?? new SettingsManager();
+    this.subpixelRenderer = new SubpixelRenderer();
   }
 
   /**
@@ -141,6 +160,15 @@ export class CrtSubpixelProcessor {
 
     // Store for potential re-render (e.g., orientation change)
     this.currentImageBitmap = input;
+
+    // Automatically set pixel density to achieve 480p output by default
+    const inputDimensions = new Dimensions(input.width, input.height);
+    const targetDensity =
+      this.subpixelRenderer.calculatePixelDensityForTargetHeight(
+        inputDimensions,
+        480, // 480p target
+      );
+    this.setPixelDensity(targetDensity);
 
     await this.imageProcessor.render(canvas, input);
   }
@@ -232,10 +260,13 @@ export class CrtSubpixelProcessor {
   /**
    * Set the RGB stripe orientation
    *
-   * @param mode 'columns' for vertical stripes, 'rows' for horizontal stripes
+   * @param mode 'columns' for vertical stripes, 'rows' for horizontal stripes, or Orientation value object
    */
-  setOrientation(mode: Orientation): void {
-    this.settingsManager.orientation = mode;
+  setOrientation(mode: Orientation | OrientationVO): void {
+    // Convert string to value object if needed (for backward compatibility)
+    const orientation =
+      typeof mode === "string" ? OrientationVO.from(mode) : mode;
+    this.settingsManager.orientation = orientation;
 
     // Re-render current image if in image mode
     if (
@@ -253,7 +284,7 @@ export class CrtSubpixelProcessor {
   /**
    * Get the current RGB stripe orientation
    */
-  getOrientation(): Orientation {
+  getOrientation(): OrientationVO {
     return this.settingsManager.orientation;
   }
 
@@ -286,6 +317,62 @@ export class CrtSubpixelProcessor {
    */
   getPixelDensity(): number {
     return this.settingsManager.pixelDensity;
+  }
+
+  /**
+   * Set interlaced rendering mode
+   *
+   * @param enabled true for interlaced (renders only every other scanline), false for progressive
+   */
+  setInterlaced(enabled: boolean): void {
+    this.settingsManager.interlaced = enabled;
+
+    // Re-render current image if in image mode
+    if (
+      !this.isCameraRunning() &&
+      this.currentImageBitmap &&
+      this.canvasManager.currentCanvas
+    ) {
+      this.imageProcessor?.render(
+        this.canvasManager.currentCanvas,
+        this.currentImageBitmap,
+      );
+    }
+  }
+
+  /**
+   * Get the current interlaced mode
+   */
+  getInterlaced(): boolean {
+    return this.settingsManager.interlaced;
+  }
+
+  /**
+   * Set field selection for interlaced rendering
+   *
+   * @param field 'odd' for odd scanlines, 'even' for even scanlines
+   */
+  setField(field: "odd" | "even"): void {
+    this.settingsManager.field = field;
+
+    // Re-render current image if in image mode
+    if (
+      !this.isCameraRunning() &&
+      this.currentImageBitmap &&
+      this.canvasManager.currentCanvas
+    ) {
+      this.imageProcessor?.render(
+        this.canvasManager.currentCanvas,
+        this.currentImageBitmap,
+      );
+    }
+  }
+
+  /**
+   * Get the current field selection
+   */
+  getField(): "odd" | "even" {
+    return this.settingsManager.field;
   }
 
   // ============================================

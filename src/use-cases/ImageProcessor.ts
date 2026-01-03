@@ -8,7 +8,7 @@ import type {
   IRenderPipeline,
   ICanvasManager,
   ISettingsManager,
-} from "../core/repositories/index.js";
+} from "../core/ports/index.js";
 import { Dimensions, PixelDensity } from "../core/value-objects/index.js";
 import { SubpixelRenderer } from "../core/services/index.js";
 

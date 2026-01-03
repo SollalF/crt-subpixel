@@ -32,4 +32,34 @@ export class SubpixelRenderer {
       Math.floor(logicalHeight * 3),
     );
   }
+
+  /**
+   * Calculate the pixel density that results in the closest output height to the target
+   *
+   * Formula: outputHeight = floor((inputHeight / density) * 3)
+   * To get outputHeight ≈ targetHeight: density ≈ inputHeight / (targetHeight / 3)
+   *
+   * @param input Input dimensions
+   * @param targetHeight Target output height in pixels (default: 480 for 480p)
+   * @returns Pixel density value that produces output closest to target height
+   */
+  calculatePixelDensityForTargetHeight(
+    input: Dimensions,
+    targetHeight: number = 480,
+  ): number {
+    // Calculate the ideal density: density = inputHeight / (targetHeight / 3)
+    const idealDensity = input.height / (targetHeight / 3);
+
+    // Verify which density (floor or ceil) gives us closer to target
+    const densityFloor = Math.max(1, Math.floor(idealDensity));
+    const densityCeil = Math.max(1, Math.ceil(idealDensity));
+
+    const outputFloor = Math.floor((input.height / densityFloor) * 3);
+    const outputCeil = Math.floor((input.height / densityCeil) * 3);
+
+    const diffFloor = Math.abs(outputFloor - targetHeight);
+    const diffCeil = Math.abs(outputCeil - targetHeight);
+
+    return diffFloor <= diffCeil ? densityFloor : densityCeil;
+  }
 }

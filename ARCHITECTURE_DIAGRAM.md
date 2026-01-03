@@ -159,11 +159,11 @@ Infrastructure (implements) ──┘
 - **Entities**: Core business objects (Image, Settings)
 - **Value Objects**: Immutable data (Dimensions, Orientation)
 - **Services**: Pure business logic (SubpixelRenderer algorithm)
-- **Interfaces**: Repository contracts (IGpuContext, etc.)
+- **Interfaces**: Port contracts (IGpuContext, etc.)
 
 ### Use Cases Layer
 
-- **Orchestration**: Coordinates domain services and repositories
+- **Orchestration**: Coordinates domain services and ports
 - **Input/Output**: DTOs for use case boundaries
 - **Business Rules**: Application-specific logic
 

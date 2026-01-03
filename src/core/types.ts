@@ -1,31 +1,43 @@
 /**
  * Core types for CRT Subpixel Processor
  * DTOs and configuration types (not domain objects)
- * This file has no dependencies on other src modules to prevent circular imports
  */
 
 /**
- * RGB stripe orientation mode (for DTOs)
+ * RGB stripe orientation mode (for DTOs and backward compatibility)
  * Use Orientation value object from core/value-objects/ for domain logic
  */
 export type Orientation = "columns" | "rows";
+
+import { Orientation as OrientationVO } from "./value-objects/Orientation.js";
+
+/**
+ * Field selection for interlaced rendering
+ */
+export type InterlaceField = "odd" | "even";
 
 /**
  * Processor settings that can be modified at runtime (DTO)
  */
 export interface ProcessorSettings {
-  /** RGB stripe orientation ('columns' for vertical, 'rows' for horizontal) */
-  orientation: Orientation;
+  /** RGB stripe orientation (use Orientation value object) */
+  orientation: OrientationVO;
   /** Pixel density for chunky pixel effect (1 = normal, 2+ = chunkier) */
   pixelDensity: number;
+  /** Enable interlaced rendering (renders only every other scanline) */
+  interlaced: boolean;
+  /** Field selection for interlaced rendering (odd or even scanlines) */
+  field: InterlaceField;
 }
 
 /**
  * Default processor settings
  */
 export const DEFAULT_SETTINGS: ProcessorSettings = {
-  orientation: "columns",
+  orientation: OrientationVO.columns(),
   pixelDensity: 1,
+  interlaced: false,
+  field: "odd",
 };
 
 /**

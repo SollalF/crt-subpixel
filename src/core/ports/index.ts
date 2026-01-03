@@ -1,5 +1,5 @@
 /**
- * Repository Interfaces
+ * Port Interfaces
  * Domain contracts for infrastructure implementations
  */
 export type { IGpuContext } from "./IGpuContext.js";

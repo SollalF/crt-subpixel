@@ -6,7 +6,7 @@ import tgpu, { type TgpuRoot, type TgpuUniform } from "typegpu";
 import * as d from "typegpu/data";
 
 import { Dimensions } from "../core/value-objects/Dimensions.js";
-import type { IGpuContext } from "../core/repositories/IGpuContext.js";
+import type { IGpuContext } from "../core/ports/IGpuContext.js";
 
 /**
  * Manages WebGPU resources including device, buffers, and samplers
@@ -19,6 +19,8 @@ export class GpuContext implements IGpuContext {
   private _inputDimensionsBuffer: TgpuUniform<d.Vec2u> | null = null;
   private _orientationBuffer: TgpuUniform<d.U32> | null = null;
   private _pixelDensityBuffer: TgpuUniform<d.U32> | null = null;
+  private _interlacedBuffer: TgpuUniform<d.U32> | null = null;
+  private _fieldBuffer: TgpuUniform<d.U32> | null = null;
   private _presentationFormat: GPUTextureFormat | null = null;
   private _initialized = false;
 
@@ -107,6 +109,26 @@ export class GpuContext implements IGpuContext {
   }
 
   /**
+   * Get the interlaced buffer (throws if not initialized)
+   */
+  get interlacedBuffer(): TgpuUniform<d.U32> {
+    if (!this._interlacedBuffer) {
+      throw new Error("GpuContext not initialized");
+    }
+    return this._interlacedBuffer;
+  }
+
+  /**
+   * Get the field buffer (throws if not initialized)
+   */
+  get fieldBuffer(): TgpuUniform<d.U32> {
+    if (!this._fieldBuffer) {
+      throw new Error("GpuContext not initialized");
+    }
+    return this._fieldBuffer;
+  }
+
+  /**
    * Initialize WebGPU device and create shared resources
    */
   async init(): Promise<void> {
@@ -145,6 +167,10 @@ export class GpuContext implements IGpuContext {
     this._orientationBuffer = this.root.createUniform(d.u32, 0);
 
     this._pixelDensityBuffer = this.root.createUniform(d.u32, 1);
+
+    this._interlacedBuffer = this.root.createUniform(d.u32, 0);
+
+    this._fieldBuffer = this.root.createUniform(d.u32, 1);
 
     // Get preferred canvas format
     this._presentationFormat = navigator.gpu.getPreferredCanvasFormat();
@@ -186,6 +212,22 @@ export class GpuContext implements IGpuContext {
   }
 
   /**
+   * Update interlaced uniform buffer
+   * @param enabled true for interlaced, false for progressive
+   */
+  writeInterlaced(enabled: boolean): void {
+    this.interlacedBuffer.write(enabled ? 1 : 0);
+  }
+
+  /**
+   * Update field uniform buffer
+   * @param isOdd true for odd field, false for even field
+   */
+  writeField(isOdd: boolean): void {
+    this.fieldBuffer.write(isOdd ? 1 : 0);
+  }
+
+  /**
    * Create a bind group using the TypeGPU root
    */
   createBindGroup<T extends Parameters<TgpuRoot["createBindGroup"]>[0]>(
@@ -216,6 +258,8 @@ export class GpuContext implements IGpuContext {
     this._inputDimensionsBuffer = null;
     this._orientationBuffer = null;
     this._pixelDensityBuffer = null;
+    this._interlacedBuffer = null;
+    this._fieldBuffer = null;
     this._presentationFormat = null;
     this._initialized = false;
   }

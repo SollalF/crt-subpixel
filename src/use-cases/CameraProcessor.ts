@@ -9,7 +9,7 @@ import type {
   ICanvasManager,
   ICameraManager,
   ISettingsManager,
-} from "../core/repositories/index.js";
+} from "../core/ports/index.js";
 import { Dimensions, PixelDensity } from "../core/value-objects/index.js";
 import { SubpixelRenderer } from "../core/services/index.js";
 
@@ -29,6 +29,7 @@ export class CameraProcessor {
   private videoFrameCallbackId: number | undefined;
   private lastFrameSize: Dimensions | null = null;
   private pendingExport: PendingExport | null = null;
+  private frameCount: number = 0;
   private readonly subpixelRenderer: SubpixelRenderer;
 
   constructor(
@@ -115,8 +116,18 @@ export class CameraProcessor {
       this.updateCanvasSize(frameWidth, frameHeight);
     }
 
+    // Auto-alternate fields for interlaced rendering
+    if (this.settingsManager.interlaced) {
+      // Toggle field each frame: odd (frame 0, 2, 4...) or even (frame 1, 3, 5...)
+      const isOddField = this.frameCount % 2 === 0;
+      this.settingsManager.field = isOddField ? "odd" : "even";
+    }
+
     // Render frame
     this.pipeline.render(video, this.canvasManager.getCurrentTextureView());
+
+    // Increment frame count for field alternation
+    this.frameCount++;
 
     // Handle pending export
     if (this.pendingExport) {
@@ -183,6 +194,7 @@ export class CameraProcessor {
 
     // Reset state
     this.lastFrameSize = null;
+    this.frameCount = 0;
 
     // Resolve pending export with null
     if (this.pendingExport) {

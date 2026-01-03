@@ -39,6 +39,12 @@ export interface IGpuContext {
   /** Get the pixel density buffer (throws if not initialized) */
   readonly pixelDensityBuffer: TgpuUniform<d.U32>;
 
+  /** Get the interlaced buffer (throws if not initialized) */
+  readonly interlacedBuffer: TgpuUniform<d.U32>;
+
+  /** Get the field buffer (throws if not initialized) */
+  readonly fieldBuffer: TgpuUniform<d.U32>;
+
   /** Update output dimensions uniform buffer */
   writeOutputDimensions(dimensions: Dimensions): void;
 
@@ -51,6 +57,12 @@ export interface IGpuContext {
   /** Update pixel density uniform buffer */
   writePixelDensity(density: number): void;
 
+  /** Update interlaced uniform buffer */
+  writeInterlaced(enabled: boolean): void;
+
+  /** Update field uniform buffer */
+  writeField(isOdd: boolean): void;
+
   /** Create a bind group using the TypeGPU root */
   createBindGroup<T extends Parameters<TgpuRoot["createBindGroup"]>[0]>(
     layout: T,
@@ -59,4 +71,10 @@ export interface IGpuContext {
 
   /** Wait for all submitted GPU work to complete */
   flush(): Promise<void>;
+
+  /** Initialize WebGPU device and create shared resources */
+  init(): Promise<void>;
+
+  /** Clean up all GPU resources */
+  destroy(): void;
 }

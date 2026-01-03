@@ -3,8 +3,8 @@
  * Handles WebGPU canvas context configuration and sizing
  */
 import { Dimensions } from "../core/value-objects/Dimensions.js";
-import type { ICanvasManager } from "../core/repositories/ICanvasManager.js";
-import type { IGpuContext } from "../core/repositories/IGpuContext.js";
+import type { ICanvasManager } from "../core/ports/ICanvasManager.js";
+import type { IGpuContext } from "../core/ports/IGpuContext.js";
 
 /**
  * Manages canvas configuration and WebGPU context
@@ -12,7 +12,6 @@ import type { IGpuContext } from "../core/repositories/IGpuContext.js";
 export class CanvasManager implements ICanvasManager {
   private canvas: HTMLCanvasElement | null = null;
   private context: GPUCanvasContext | null = null;
-  private gpuContext: IGpuContext | null = null;
 
   /**
    * Get the current canvas (if configured)
@@ -49,7 +48,6 @@ export class CanvasManager implements ICanvasManager {
 
     this.canvas = canvas;
     this.context = context;
-    this.gpuContext = gpuContext;
 
     context.configure({
       device: gpuContext.device,
@@ -141,6 +139,5 @@ export class CanvasManager implements ICanvasManager {
   reset(): void {
     this.canvas = null;
     this.context = null;
-    this.gpuContext = null;
   }
 }

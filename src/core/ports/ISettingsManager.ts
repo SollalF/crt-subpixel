@@ -2,7 +2,8 @@
  * Settings Manager Repository Interface
  * Defines the contract for settings operations required by use cases
  */
-import type { Orientation, ProcessorSettings } from "../types.js";
+import type { ProcessorSettings } from "../types.js";
+import type { Orientation } from "../value-objects/Orientation.js";
 import type { IGpuContext } from "./IGpuContext.js";
 
 /**
@@ -15,6 +16,12 @@ export interface ISettingsManager {
 
   /** Get/set the current pixel density */
   pixelDensity: number;
+
+  /** Get/set interlaced rendering mode */
+  interlaced: boolean;
+
+  /** Get/set field selection for interlaced rendering */
+  field: "odd" | "even";
 
   /** Get a copy of all current settings */
   getSettings(): ProcessorSettings;

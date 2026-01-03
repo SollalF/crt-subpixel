@@ -116,7 +116,7 @@ src/
 │   │   └── PixelDensity.ts
 │   ├── services/
 │   │   └── SubpixelRenderer.ts      # Core rendering algorithm (pure logic)
-│   └── repositories/                # Repository interfaces
+│   └── ports/                       # Port interfaces (hexagonal architecture)
 │       ├── IGpuContext.ts
 │       ├── ICanvasManager.ts
 │       ├── ICameraManager.ts
@@ -195,8 +195,8 @@ infrastructure/ (implements domain interfaces)
    - Create value objects (Dimensions, Orientation, PixelDensity)
    - Create domain services (SubpixelRenderer)
 
-2. **Create Repository Interfaces**
-   - Define interfaces in `domain/repositories/`
+2. **Create Port Interfaces**
+   - Define interfaces in `domain/ports/`
    - Move implementation details to infrastructure
 
 3. **Refactor Use Cases**

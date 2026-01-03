@@ -11,7 +11,7 @@
  */
 
 // Main processor facade
-export { CrtSubpixelProcessor } from "./CrtSubpixelProcessor.js";
+export { CrtSubpixelProcessor } from "./presentation/CrtSubpixelProcessor.js";
 
 // Core types
 export type {
@@ -19,6 +19,7 @@ export type {
   ProcessorSettings,
   ExportOptions,
   CameraOptions,
+  InterlaceField,
 } from "./core/types.js";
 
 // Value objects

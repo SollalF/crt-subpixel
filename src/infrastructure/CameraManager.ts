@@ -4,7 +4,7 @@
  */
 import { type CameraOptions, DEFAULT_CAMERA_OPTIONS } from "../core/types.js";
 import { Dimensions } from "../core/value-objects/Dimensions.js";
-import type { ICameraManager } from "../core/repositories/ICameraManager.js";
+import type { ICameraManager } from "../core/ports/ICameraManager.js";
 
 /**
  * Camera stream information
