@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "prepare": "husky install",
+    "prepare": "pnpm run build && husky install",
     "build": "tsc",
     "lint": "eslint .",
     "format": "prettier --write .",
