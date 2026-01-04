@@ -238,6 +238,27 @@ export class CrtSubpixelProcessor {
     return this.cameraProcessor.exportFrame({ type, quality });
   }
 
+  /**
+   * Get the current camera frame dimensions
+   *
+   * @returns Object with width and height properties, or null if camera is not running or not ready
+   */
+  getCameraDimensions(): { width: number; height: number } | null {
+    if (!this.isCameraRunning()) {
+      return null;
+    }
+
+    const dimensions = this.cameraManager.getFrameDimensions();
+    if (!dimensions) {
+      return null;
+    }
+
+    return {
+      width: dimensions.width,
+      height: dimensions.height,
+    };
+  }
+
   // ============================================
   // Settings
   // ============================================
