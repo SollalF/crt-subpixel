@@ -19,7 +19,6 @@
   "scripts": {
     "build": "vite build",
     "prepublishOnly": "pnpm build",
-    "prepare": "husky install",
     "lint": "eslint .",
     "format": "prettier --write .",
     "dev": "vite",
