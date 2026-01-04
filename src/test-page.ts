@@ -199,19 +199,23 @@ async function processAndRender(imageBitmap: ImageBitmap, saveImage = true) {
     downloadButton.disabled = true;
 
     // Automatically set pixel density to achieve 480p output by default
-    const inputDimensions = new Dimensions(
-      imageBitmap.width,
-      imageBitmap.height,
-    );
-    const targetDensity = subpixelRenderer.calculatePixelDensityForTargetHeight(
-      inputDimensions,
-      480, // 480p target
-    );
-    proc.setPixelDensity(targetDensity);
+    // Only do this when loading a new image, not when reprocessing with different settings
+    if (saveImage) {
+      const inputDimensions = new Dimensions(
+        imageBitmap.width,
+        imageBitmap.height,
+      );
+      const targetDensity =
+        subpixelRenderer.calculatePixelDensityForTargetHeight(
+          inputDimensions,
+          480, // 480p target
+        );
+      proc.setPixelDensity(targetDensity);
 
-    // Update UI to reflect the calculated pixel density
-    densitySlider.value = String(targetDensity);
-    densityValue.textContent = String(targetDensity);
+      // Update UI to reflect the calculated pixel density
+      densitySlider.value = String(targetDensity);
+      densityValue.textContent = String(targetDensity);
+    }
 
     // Render image directly to canvas (unified flow)
     await proc.renderImage(canvas, imageBitmap);
