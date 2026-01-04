@@ -110,6 +110,15 @@ export declare class CrtSubpixelProcessor {
    */
   exportCameraFrame(type?: string, quality?: number): Promise<Blob | null>;
   /**
+   * Get the current camera frame dimensions
+   *
+   * @returns Object with width and height properties, or null if camera is not running or not ready
+   */
+  getCameraDimensions(): {
+    width: number;
+    height: number;
+  } | null;
+  /**
    * Set the RGB stripe orientation
    *
    * @param mode 'columns' for vertical stripes, 'rows' for horizontal stripes, or Orientation value object

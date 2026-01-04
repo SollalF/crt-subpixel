@@ -18,12 +18,12 @@ class w {
   cameraProcessor = null;
   // Track current image for re-rendering
   currentImageBitmap = null;
-  constructor(e, t, r, a, i) {
+  constructor(e, t, r, i, a) {
     ((this.gpuContext = e ?? new n()),
       (this.pipeline = t ?? new o()),
       (this.canvasManager = r ?? new g()),
-      (this.cameraManager = a ?? new c()),
-      (this.settingsManager = i ?? new m()));
+      (this.cameraManager = i ?? new c()),
+      (this.settingsManager = a ?? new m()));
   }
   /**
    * Check if processor is initialized
@@ -134,6 +134,21 @@ class w {
     return this.cameraProcessor
       ? this.cameraProcessor.exportFrame({ type: e, quality: t })
       : (console.warn("Processor not initialized"), null);
+  }
+  /**
+   * Get the current camera frame dimensions
+   *
+   * @returns Object with width and height properties, or null if camera is not running or not ready
+   */
+  getCameraDimensions() {
+    if (!this.isCameraRunning()) return null;
+    const e = this.cameraManager.getFrameDimensions();
+    return e
+      ? {
+          width: e.width,
+          height: e.height,
+        }
+      : null;
   }
   // ============================================
   // Settings
